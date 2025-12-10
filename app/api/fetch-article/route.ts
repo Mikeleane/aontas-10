@@ -4,67 +4,79 @@ import { Readability } from "@mozilla/readability";
 
 export const runtime = "nodejs";
 
-type FetchRequestBody = {
-  url: string;
-};
-
-export async function POST(request: Request) {
+export async function POST(req: Request) {
   try {
-    const { url } = (await request.json()) as FetchRequestBody;
-
-    if (!url || typeof url !== "string") {
+    // 1) Parse request body safely
+    let body: any;
+    try {
+      body = await req.json();
+    } catch {
       return NextResponse.json(
-        { error: "Missing or invalid 'url' field." },
+        { error: "Invalid JSON body in request." },
         { status: 400 }
       );
     }
 
-    // Fetch the raw HTML
-    const res = await fetch(url);
-    if (!res.ok) {
-      console.error("Failed to fetch URL:", url, res.status, res.statusText);
+    const url = (body?.url || "").toString().trim();
+    if (!url) {
       return NextResponse.json(
-        { error: `Failed to fetch URL (status ${res.status}).` },
-        { status: 500 }
+        { error: "Missing 'url' in request body." },
+        { status: 400 }
+      );
+    }
+
+    // 2) Fetch the article HTML with a browser-like user agent
+    const res = await fetch(url, {
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        Accept:
+          "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+    });
+
+    if (!res.ok) {
+      console.error("Upstream fetch failed", url, res.status, res.statusText);
+      return NextResponse.json(
+        {
+          error: `Failed to fetch article (status ${res.status} ${res.statusText}).`,
+        },
+        { status: 502 }
       );
     }
 
     const html = await res.text();
+    if (!html || !html.trim()) {
+      return NextResponse.json(
+        { error: "Empty response from article URL." },
+        { status: 502 }
+      );
+    }
 
-    // Use Readability to extract the main article
+    // 3) Use JSDOM + Readability to extract the main article
     const dom = new JSDOM(html, { url });
     const reader = new Readability(dom.window.document);
     const article = reader.parse();
 
-    let title =
-      article?.title || dom.window.document.title || url;
-    let content = article?.textContent || "";
-
-    if (!content.trim()) {
-      // Fallback: basic textContent of the body
-      content = dom.window.document.body?.textContent || "";
-    }
-
-    const cleaned = content
-      .replace(/\r\n/g, "\n")
-      .replace(/\n{3,}/g, "\n\n")
-      .trim();
-
-    if (!cleaned) {
+    if (!article || !article.textContent || !article.textContent.trim()) {
       return NextResponse.json(
-        { error: "Could not extract article text from that page." },
-        { status: 500 }
+        { error: "Could not extract readable article text from that page." },
+        { status: 422 }
       );
     }
 
-    return NextResponse.json({
-      title: title?.trim() || null,
-      text: cleaned,
-    });
-  } catch (err) {
-    console.error("Error in /api/fetch-article:", err);
+    // 4) Always return JSON
     return NextResponse.json(
-      { error: "Failed to fetch or parse article." },
+      {
+        title: article.title ?? null,
+        text: article.textContent.trim(),
+      },
+      { status: 200 }
+    );
+  } catch (err: any) {
+    console.error("fetch-article route error", err);
+    return NextResponse.json(
+      { error: "Unexpected error while fetching article." },
       { status: 500 }
     );
   }
