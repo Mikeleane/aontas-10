@@ -9,6 +9,10 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@mozilla/readability": "^0.6.0",
+    "docx": "^9.5.1",
+    "jsdom": "^27.3.0",
+    "jspdf": "^3.0.4",
     "next": "16.0.7",
     "react": "19.2.0",
     "react-dom": "19.2.0"
