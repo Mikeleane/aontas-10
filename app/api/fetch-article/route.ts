@@ -5,8 +5,8 @@ import { Readability } from "@mozilla/readability";
 
 export const runtime = "nodejs";
 
+// Simple GET handler so you can test the route in the browser
 export async function GET() {
-  // Simple health check so you can open /api/fetch-article in the browser
   return NextResponse.json(
     { ok: true, method: "GET", route: "fetch-article" },
     { status: 200 }
@@ -34,7 +34,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // 2) Fetch the article HTML with a browser-like user agent
+    // 2) Fetch HTML from the article URL
     const res = await fetch(url, {
       headers: {
         "User-Agent":
@@ -62,7 +62,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // 3) Use JSDOM + Readability to extract the main article
+    // 3) Use Readability to extract the main article content
     const dom = new JSDOM(html, { url });
     const reader = new Readability(dom.window.document);
     const article = reader.parse();
@@ -74,7 +74,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // 4) Always return JSON
+    // 4) Success: always return JSON
     return NextResponse.json(
       {
         title: article.title ?? null,
