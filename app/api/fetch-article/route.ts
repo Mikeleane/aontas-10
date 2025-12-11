@@ -3,7 +3,6 @@ import { NextResponse } from "next/server";
 
 export const runtime = "nodejs";
 
-// Simple GET so you can check the route in a browser
 export async function GET() {
   return NextResponse.json(
     { ok: true, route: "fetch-article", method: "GET" },
@@ -13,8 +12,8 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    // ---- 1. Parse body safely ----
-    let body: any = null;
+    // 1. Parse body
+    let body: any;
     try {
       body = await req.json();
     } catch {
@@ -32,15 +31,16 @@ export async function POST(req: Request) {
       );
     }
 
-    // ---- 2. Dynamically import jsdom + readability ----
+    // 2. Dynamic imports so bundler treats them nicely
     let JSDOM: any;
     let Readability: any;
-
     try {
-      const jsdomMod = await import("jsdom");
-      const readabilityMod = await import("@mozilla/readability");
-      JSDOM = jsdomMod.JSDOM;
-      Readability = readabilityMod.Readability;
+      const [{ JSDOM: J }, { Readability: R }] = await Promise.all([
+        import("jsdom"),
+        import("@mozilla/readability"),
+      ]);
+      JSDOM = J;
+      Readability = R;
     } catch (e) {
       console.error("Failed to import jsdom/readability:", e);
       return NextResponse.json(
@@ -52,7 +52,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // ---- 3. Fetch the page HTML ----
+    // 3. Fetch HTML
     const upstream = await fetch(url, {
       headers: {
         "User-Agent":
@@ -85,19 +85,21 @@ export async function POST(req: Request) {
       );
     }
 
-    // ---- 4. Extract main article with Readability ----
+    // 4. Use Readability via jsdom
     const dom = new JSDOM(html, { url });
     const reader = new Readability(dom.window.document);
     const article = reader.parse();
 
     if (!article || !article.textContent || !article.textContent.trim()) {
       return NextResponse.json(
-        { error: "Could not extract readable article text from that page." },
+        {
+          error:
+            "Could not extract readable article text from that page. Try pasting the text manually.",
+        },
         { status: 422 }
       );
     }
 
-    // ---- 5. Success ----
     return NextResponse.json(
       {
         title: article.title ?? null,
