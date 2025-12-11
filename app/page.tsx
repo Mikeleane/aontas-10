@@ -186,23 +186,27 @@ async function handleFetchArticle() {
       body: JSON.stringify({ url: articleUrl.trim() }),
     });
 
-    let data: any;
+    // Read body ONCE
+    const raw = await res.text();
+    let data: any = null;
+
+    // Try to parse JSON, but don't crash if it's not JSON
     try {
-      // Try to parse JSON, but don’t crash the UI if it’s not valid
-      data = await res.json();
-    } catch {
-      const text = await res.text();
-      console.error("Non-JSON response from /api/fetch-article:", text);
+      data = raw ? JSON.parse(raw) : null;
+    } catch (e) {
+      console.error("Non-JSON response from /api/fetch-article:", raw);
       throw new Error(
-        "The article service returned an unexpected response. Try pasting the text manually."
+        `Unexpected response from article service (status ${res.status}). Try pasting the text manually.`
       );
     }
 
     if (!res.ok) {
-      throw new Error(data.error || "Failed to fetch article text.");
+      throw new Error(
+        data?.error || `Failed to fetch article text (status ${res.status}).`
+      );
     }
 
-    if (!data.text || !data.text.trim()) {
+    if (!data?.text || !data.text.trim()) {
       throw new Error("Could not extract readable article text.");
     }
 
