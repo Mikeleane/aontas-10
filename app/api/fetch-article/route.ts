@@ -1,3 +1,4 @@
+// app/api/fetch-article/route.ts
 import { NextResponse } from "next/server";
 import { JSDOM } from "jsdom";
 import { Readability } from "@mozilla/readability";
