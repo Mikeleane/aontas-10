@@ -764,11 +764,14 @@ const data = ${dataJson};
   var pronouncePanel = document.getElementById("pronounce-panel");
   var voiceSel = document.getElementById("tts-voice");
 
- <script>
   var synthSupported = "speechSynthesis" in window && "SpeechSynthesisUtterance" in window;
   var currentUtterance = null;
-  var availableVoices = [];
-  var preferredVoice = null;
+  var voices = [];
+
+  var Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var recogSupported = !!Recognition;
+  var recognizer = recogSupported ? new Recognition() : null;
+  var currentTargetPhrase = "";
 
   function setTtsStatus(msg) {
     var el = document.getElementById("tts-status");
@@ -778,7 +781,6 @@ const data = ${dataJson};
 
   function guessLangCode() {
     var lang = (data.meta.outputLanguage || "").toLowerCase();
-
     if (lang.indexOf("irish") !== -1) return "ga-IE";
     if (lang.indexOf("french") !== -1) return "fr-FR";
     if (lang.indexOf("german") !== -1) return "de-DE";
@@ -792,92 +794,6 @@ const data = ${dataJson};
     return "";
   }
 
-  function buildVoiceCandidates(langCode) {
-    // Given a target language code, return a list of acceptable prefixes to try.
-    if (!langCode) return [];
-
-    var lc = langCode.toLowerCase();
-
-    if (lc === "ga-ie") {
-      // Irish: prefer true Irish, then Irish English, then GB/US English
-      return ["ga-IE", "ga", "en-IE", "en-GB", "en-US", "en"];
-    }
-    if (lc === "la") {
-      // Latin: very few systems have this; Italian/Spanish are decent fallbacks
-      return ["la", "it", "es", "en"];
-    }
-    // Generic: exact match, language-only match, then English
-    var base = langCode.split("-")[0].toLowerCase();
-    return [langCode, base, "en-GB", "en-US", "en"];
-  }
-
-  function pickPreferredVoice() {
-    if (!synthSupported) return;
-
-    availableVoices = window.speechSynthesis.getVoices() || [];
-    if (!availableVoices.length) {
-      setTtsStatus("No TTS voices available on this device.");
-      return;
-    }
-
-    var langCode = guessLangCode();
-    var candidates = buildVoiceCandidates(langCode);
-    var chosen = null;
-
-    function matchVoices(codes) {
-      for (var i = 0; i < codes.length; i++) {
-        var code = codes[i].toLowerCase();
-        for (var j = 0; j < availableVoices.length; j++) {
-          var v = availableVoices[j];
-          var vLang = (v.lang || "").toLowerCase();
-          if (vLang && vLang.indexOf(code) === 0) {
-            return v;
-          }
-        }
-      }
-      return null;
-    }
-
-    if (candidates.length) {
-      chosen = matchVoices(candidates);
-    }
-    if (!chosen) {
-      // final fallback: just grab the first voice
-      chosen = availableVoices[0];
-    }
-
-    preferredVoice = chosen;
-
-    if (!langCode) {
-      setTtsStatus("Using voice: " + chosen.name + " (" + chosen.lang + ")");
-    } else {
-      var lc = (chosen.lang || "").toLowerCase();
-      var requestedPrefix = langCode.split("-")[0].toLowerCase();
-      if (lc.indexOf(requestedPrefix) === 0) {
-        setTtsStatus("Using voice: " + chosen.name + " (" + chosen.lang + ")");
-      } else {
-        setTtsStatus(
-          "Using fallback voice: " +
-            chosen.name +
-            " (" +
-            chosen.lang +
-            "). Your browser doesn't have a native " +
-            data.meta.outputLanguage +
-            " voice installed."
-        );
-      }
-    }
-  }
-
-  if (synthSupported) {
-    // Some browsers load voices asynchronously
-    window.speechSynthesis.onvoiceschanged = function () {
-      pickPreferredVoice();
-    };
-    // …and some already have them
-    pickPreferredVoice();
-  }
-
   function getCurrentMode() {
     var activeBtn = document.querySelector(".mode-btn.active");
     return (activeBtn && activeBtn.getAttribute("data-mode")) || "standard";
@@ -888,13 +804,49 @@ const data = ${dataJson};
     return text;
   }
 
+  function populateVoices() {
+    if (!synthSupported || !window.speechSynthesis) return;
+    var all = window.speechSynthesis.getVoices();
+    if (!all || !all.length) return;
+
+    var langCode = guessLangCode();
+    var primary = [];
+    var fallback = [];
+
+    all.forEach(function(v) {
+      if (langCode && v.lang && v.lang.toLowerCase().indexOf(langCode.toLowerCase().slice(0,2)) === 0) {
+        primary.push(v);
+      } else {
+        fallback.push(v);
+      }
+    });
+
+    voices = primary.length ? primary : all;
+
+    if (!voiceSel) return;
+    voiceSel.innerHTML = "";
+    var defaultOpt = document.createElement("option");
+    defaultOpt.value = "";
+    defaultOpt.textContent = "Default";
+    voiceSel.appendChild(defaultOpt);
+
+    voices.forEach(function(v, idx) {
+      var opt = document.createElement("option");
+      opt.value = v.name;
+      opt.textContent = v.name + " (" + v.lang + ")";
+      voiceSel.appendChild(opt);
+    });
+  }
+
+  if (synthSupported && window.speechSynthesis) {
+    populateVoices();
+    window.speechSynthesis.onvoiceschanged = populateVoices;
+  }
+
   function speakText(text) {
     if (!synthSupported || !text || !text.trim()) return;
-
     window.speechSynthesis.cancel();
     var u = new SpeechSynthesisUtterance(text);
-
-    // speed control
     var rateSel = document.getElementById("tts-speed");
     var rate = 1;
     if (rateSel) {
@@ -902,25 +854,25 @@ const data = ${dataJson};
       if (!isNaN(val)) rate = val;
     }
     u.rate = rate;
-
     var langCode = guessLangCode();
     if (langCode) u.lang = langCode;
-    if (preferredVoice) u.voice = preferredVoice;
+
+    if (voiceSel && voiceSel.value && voices && voices.length) {
+      var chosen = null;
+      voices.forEach(function(v) {
+        if (v.name === voiceSel.value) chosen = v;
+      });
+      if (chosen) {
+        u.voice = chosen;
+      }
+    }
 
     currentUtterance = u;
-    u.onstart = function () {
-      setTtsStatus("Reading…");
-    };
-    u.onend = function () {
-      setTtsStatus("Done");
-    };
-    u.onerror = function () {
-      setTtsStatus("Error");
-    };
+    u.onstart = function(){ setTtsStatus("Reading..."); };
+    u.onend = function(){ setTtsStatus("Done"); };
+    u.onerror = function(){ setTtsStatus("Error"); };
     window.speechSynthesis.speak(u);
   }
-</script>
-
 
   function levenshtein(a, b) {
     a = a || "";
