@@ -2112,6 +2112,9 @@ const data = ${dataJson};
                   STANDARD and an ADAPTED version, but they all share a single
                   answer key so the whole class can work together.
                 </p>
+<p className="text-[10px] text-slate-400 mt-1">
+          Selected blocks: {buildSelectedBlocksLabel()}
+        </p>
               </div>
               <button
                 type="button"
