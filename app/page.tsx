@@ -411,27 +411,45 @@ async function handleFetchArticle() {
 
     doc.save(filename);
   }
+  // === FILENAME HELPERS ===
+
+  function getSafeSlug() {
+    const safeType = outputType.replace(/\s+/g, "-").toLowerCase();
+    const safeLevel = level.toLowerCase();
+    return { safeType, safeLevel };
+  }
+
+  function buildBaseName(stem?: string) {
+    const { safeType, safeLevel } = getSafeSlug();
+    const prefix = "aontas10";
+    if (!stem) {
+      // e.g. "aontas10-article-b1"
+      return `${prefix}-${safeType}-${safeLevel}`;
+    }
+    // e.g. "aontas10-exercises-standard-article-b1"
+    return `${prefix}-${stem}-${safeType}-${safeLevel}`;
+  }
+
 
   async function handleDownload() {
     if (!result) return;
     const lines = buildExportLines();
     if (!lines.length) return;
 
-    const safeType = outputType.replace(/\s+/g, "-").toLowerCase();
-    const safeLevel = level.toLowerCase();
+    const baseName = buildBaseName();
 
     if (exportFormat === "txt") {
-      downloadTxt(lines, `aontas10-${safeType}-${safeLevel}.txt`);
+      downloadTxt(lines, `${baseName}.txt`);
     } else if (exportFormat === "docx") {
-      await downloadDocx(lines, `aontas10-${safeType}-${safeLevel}.docx`);
+      await downloadDocx(lines, `${baseName}.docx`);
     } else if (exportFormat === "pdf") {
-      downloadPdf(
-        lines,
-        `aontas10-${safeType}-${safeLevel}.pdf`,
-        { fontSize: 11, lineHeight: 7 }
-      );
+      downloadPdf(lines, `${baseName}.pdf`, {
+        fontSize: 11,
+        lineHeight: 7,
+      });
     }
   }
+
 
   // === INTERACTIVE HTML EXPORT ===
 
@@ -1423,11 +1441,10 @@ const data = ${dataJson};
   function handleDownloadInteractiveHtml() {
     const html = buildInteractiveHtml();
     if (!html) return;
-    const safeType = outputType.replace(/\s+/g, "-").toLowerCase();
-    const safeLevel = level.toLowerCase();
-    const filename = `aontas10-interactive-${safeType}-${safeLevel}.html`;
-    downloadHtml(html, filename);
+    const baseName = buildBaseName("interactive");
+    downloadHtml(html, `${baseName}.html`);
   }
+
 
   // === DEBUG SNAPSHOT ===
 
@@ -1475,15 +1492,15 @@ const data = ${dataJson};
     });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    const safeType = outputType.replace(/\s+/g, "-").toLowerCase();
-    const safeLevel = level.toLowerCase();
+    const baseName = buildBaseName("debug");
     a.href = url;
-    a.download = `aontas10-debug-${safeType}-${safeLevel}.json`;
+    a.download = `${baseName}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }
+
 
   // === EXERCISE GENERATION ===
 
@@ -1779,16 +1796,14 @@ const data = ${dataJson};
     const lines = buildStandardExerciseLines();
     if (!lines.length) return;
 
-    const safeType = outputType.replace(/\s+/g, "-").toLowerCase();
-    const safeLevel = level.toLowerCase();
-    const filename = `aontas10-exercises-standard-${safeType}-${safeLevel}`;
+    const baseName = buildBaseName("exercises-standard");
 
     if (exerciseExportFormat === "txt") {
-      downloadTxt(lines, `${filename}.txt`);
+      downloadTxt(lines, `${baseName}.txt`);
     } else if (exerciseExportFormat === "docx") {
-      await downloadDocx(lines, `${filename}.docx`);
+      await downloadDocx(lines, `${baseName}.docx`);
     } else {
-      downloadPdf(lines, `${filename}.pdf`, {
+      downloadPdf(lines, `${baseName}.pdf`, {
         fontSize: 11,
         lineHeight: 7,
       });
@@ -1800,59 +1815,53 @@ const data = ${dataJson};
     const lines = buildAdaptedExerciseLines();
     if (!lines.length) return;
 
-    const safeType = outputType.replace(/\s+/g, "-").toLowerCase();
-    const safeLevel = level.toLowerCase();
-    const filename = `aontas10-exercises-adapted-${safeType}-${safeLevel}`;
+    const baseName = buildBaseName("exercises-adapted");
 
     if (exerciseExportFormat === "txt") {
-      downloadTxt(lines, `${filename}.txt`);
+      downloadTxt(lines, `${baseName}.txt`);
     } else if (exerciseExportFormat === "docx") {
-      await downloadDocx(lines, `${filename}.docx`);
+      await downloadDocx(lines, `${baseName}.docx`);
     } else {
-      downloadPdf(lines, `${filename}.pdf`, {
+      downloadPdf(lines, `${baseName}.pdf`, {
         fontSize: 11,
         lineHeight: 7,
       });
     }
   }
 
-  async function handleDownloadTeacherKey() {
+   async function handleDownloadTeacherKey() {
     if (!exercises || !exercises.length) return;
     const lines = buildTeacherKeyLines();
     if (!lines.length) return;
 
-    const safeType = outputType.replace(/\s+/g, "-").toLowerCase();
-    const safeLevel = level.toLowerCase();
-    const filename = `aontas10-exercises-key-${safeType}-${safeLevel}`;
+    const baseName = buildBaseName("exercises-key");
 
     if (exerciseExportFormat === "txt") {
-      downloadTxt(lines, `${filename}.txt`);
+      downloadTxt(lines, `${baseName}.txt`);
     } else if (exerciseExportFormat === "docx") {
-      await downloadDocx(lines, `${filename}.docx`);
+      await downloadDocx(lines, `${baseName}.docx`);
     } else {
-      downloadPdf(lines, `${filename}.pdf`, {
+      downloadPdf(lines, `${baseName}.pdf`, {
         fontSize: 11,
         lineHeight: 7,
       });
     }
   }
 
-  async function handleDownloadStandardCombined() {
+
+    async function handleDownloadStandardCombined() {
     if (!exercises || !exercises.length || !result) return;
     const lines = buildStandardCombinedLines();
     if (!lines.length) return;
 
-    const safeType = outputType.replace(/\s+/g, "-").toLowerCase();
-    const safeLevel = level.toLowerCase();
-    const filename =
-      `aontas10-reading-questions-standard-${safeType}-${safeLevel}`;
+    const baseName = buildBaseName("reading-questions-standard");
 
     if (exerciseExportFormat === "txt") {
-      downloadTxt(lines, `${filename}.txt`);
+      downloadTxt(lines, `${baseName}.txt`);
     } else if (exerciseExportFormat === "docx") {
-      await downloadDocx(lines, `${filename}.docx`);
+      await downloadDocx(lines, `${baseName}.docx`);
     } else {
-      downloadPdf(lines, `${filename}.pdf`, {
+      downloadPdf(lines, `${baseName}.pdf`, {
         fontSize: 10,
         lineHeight: 6.5,
         marginLeft: 15,
@@ -1867,17 +1876,14 @@ const data = ${dataJson};
     const lines = buildAdaptedCombinedLines();
     if (!lines.length) return;
 
-    const safeType = outputType.replace(/\s+/g, "-").toLowerCase();
-    const safeLevel = level.toLowerCase();
-    const filename =
-      `aontas10-reading-questions-adapted-${safeType}-${safeLevel}`;
+    const baseName = buildBaseName("reading-questions-adapted");
 
     if (exerciseExportFormat === "txt") {
-      downloadTxt(lines, `${filename}.txt`);
+      downloadTxt(lines, `${baseName}.txt`);
     } else if (exerciseExportFormat === "docx") {
-      await downloadDocx(lines, `${filename}.docx`);
+      await downloadDocx(lines, `${baseName}.docx`);
     } else {
-      downloadPdf(lines, `${filename}.pdf`, {
+      downloadPdf(lines, `${baseName}.pdf`, {
         fontSize: 10,
         lineHeight: 6.5,
         marginLeft: 15,
