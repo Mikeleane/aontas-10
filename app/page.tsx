@@ -170,42 +170,52 @@ export default function Home() {
     }
   }
 
-  async function handleFetchArticle() {
-    if (!articleUrl.trim()) return;
+async function handleFetchArticle() {
+  if (!articleUrl.trim()) return;
 
-    setFetchingArticle(true);
-    setArticleError(null);
-    setArticleTitle(null);
+  setFetchingArticle(true);
+  setArticleError(null);
+  setArticleTitle(null);
 
+  try {
+    const res = await fetch("/api/fetch-article", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ url: articleUrl.trim() }),
+    });
+
+    let data: any;
     try {
-      const res = await fetch("/api/fetch-article", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ url: articleUrl.trim() }),
-      });
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || "Failed to fetch article text.");
-      }
-
-      if (!data.text || !data.text.trim()) {
-        throw new Error("Could not extract readable article text.");
-      }
-
-      setArticleTitle(data.title || null);
-      setInputText(data.text);
-    } catch (err: any) {
-      setArticleError(
-        err.message || "Something went wrong fetching the article."
+      // Try to parse JSON, but don’t crash the UI if it’s not valid
+      data = await res.json();
+    } catch {
+      const text = await res.text();
+      console.error("Non-JSON response from /api/fetch-article:", text);
+      throw new Error(
+        "The article service returned an unexpected response. Try pasting the text manually."
       );
-    } finally {
-      setFetchingArticle(false);
     }
+
+    if (!res.ok) {
+      throw new Error(data.error || "Failed to fetch article text.");
+    }
+
+    if (!data.text || !data.text.trim()) {
+      throw new Error("Could not extract readable article text.");
+    }
+
+    setArticleTitle(data.title || null);
+    setInputText(data.text);
+  } catch (err: any) {
+    setArticleError(
+      err.message || "Something went wrong fetching the article."
+    );
+  } finally {
+    setFetchingArticle(false);
   }
+}
 
   // === TEXT EXPORTS ===
 
