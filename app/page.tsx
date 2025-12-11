@@ -900,8 +900,8 @@ const data = ${dataJson};
   }
 
   function similarity(a, b) {
-    var s1 = (a || "").toLowerCase().replace(/[^a-zà-ÿœæçñüß0-9\s]/g, "").trim();
-    var s2 = (b || "").toLowerCase().replace(/[^a-zà-ÿœæçñüß0-9\s]/g, "").trim();
+    var s1 = (a || "").toLowerCase().replace(/[^a-zà-ÿœæçñüß0-9\\s]/g, "").trim();
+    var s2 = (b || "").toLowerCase().replace(/[^a-zà-ÿœæçñüß0-9\\s]/g, "").trim();
     if (!s1 || !s2) return 0;
     var dist = levenshtein(s1, s2);
     var maxLen = Math.max(s1.length, s2.length);
