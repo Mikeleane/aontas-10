@@ -23,6 +23,7 @@
     "jsdom": "21.1.2",
     "parse5": "6.0.1"
   }
+}
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
     "@types/jsdom": "^27.0.0",
