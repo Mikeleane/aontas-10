@@ -5,6 +5,14 @@ import { Readability } from "@mozilla/readability";
 
 export const runtime = "nodejs";
 
+export async function GET() {
+  // Simple health check so you can open /api/fetch-article in the browser
+  return NextResponse.json(
+    { ok: true, method: "GET", route: "fetch-article" },
+    { status: 200 }
+  );
+}
+
 export async function POST(req: Request) {
   try {
     // 1) Parse request body safely
