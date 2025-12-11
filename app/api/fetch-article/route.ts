@@ -1,22 +1,20 @@
 // app/api/fetch-article/route.ts
 import { NextResponse } from "next/server";
-import { JSDOM } from "jsdom";
-import { Readability } from "@mozilla/readability";
 
 export const runtime = "nodejs";
 
-// Simple GET handler so you can test the route in the browser
+// Simple GET so you can check the route in a browser
 export async function GET() {
   return NextResponse.json(
-    { ok: true, method: "GET", route: "fetch-article" },
+    { ok: true, route: "fetch-article", method: "GET" },
     { status: 200 }
   );
 }
 
 export async function POST(req: Request) {
   try {
-    // 1) Parse request body safely
-    let body: any;
+    // ---- 1. Parse body safely ----
+    let body: any = null;
     try {
       body = await req.json();
     } catch {
@@ -34,8 +32,28 @@ export async function POST(req: Request) {
       );
     }
 
-    // 2) Fetch HTML from the article URL
-    const res = await fetch(url, {
+    // ---- 2. Dynamically import jsdom + readability ----
+    let JSDOM: any;
+    let Readability: any;
+
+    try {
+      const jsdomMod = await import("jsdom");
+      const readabilityMod = await import("@mozilla/readability");
+      JSDOM = jsdomMod.JSDOM;
+      Readability = readabilityMod.Readability;
+    } catch (e) {
+      console.error("Failed to import jsdom/readability:", e);
+      return NextResponse.json(
+        {
+          error:
+            "Server is missing HTML parsing modules (jsdom/readability). Please contact the site admin.",
+        },
+        { status: 500 }
+      );
+    }
+
+    // ---- 3. Fetch the page HTML ----
+    const upstream = await fetch(url, {
       headers: {
         "User-Agent":
           "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
@@ -44,17 +62,22 @@ export async function POST(req: Request) {
       },
     });
 
-    if (!res.ok) {
-      console.error("Upstream fetch failed", url, res.status, res.statusText);
+    if (!upstream.ok) {
+      console.error(
+        "Upstream fetch failed",
+        url,
+        upstream.status,
+        upstream.statusText
+      );
       return NextResponse.json(
         {
-          error: `Failed to fetch article (status ${res.status} ${res.statusText}).`,
+          error: `Failed to fetch article (status ${upstream.status} ${upstream.statusText}).`,
         },
         { status: 502 }
       );
     }
 
-    const html = await res.text();
+    const html = await upstream.text();
     if (!html || !html.trim()) {
       return NextResponse.json(
         { error: "Empty response from article URL." },
@@ -62,7 +85,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // 3) Use Readability to extract the main article content
+    // ---- 4. Extract main article with Readability ----
     const dom = new JSDOM(html, { url });
     const reader = new Readability(dom.window.document);
     const article = reader.parse();
@@ -74,7 +97,7 @@ export async function POST(req: Request) {
       );
     }
 
-    // 4) Success: always return JSON
+    // ---- 5. Success ----
     return NextResponse.json(
       {
         title: article.title ?? null,
