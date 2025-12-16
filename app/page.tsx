@@ -1076,7 +1076,8 @@ const data = ${dataJson};
     readingEl.appendChild(title);
 
     var text = (data.reading && data.reading[mode]) || "";
-    var paragraphs = text.split(/[\r\n]+/);
+        var paragraphs = text.split(/[\\r\\n]+/);
+
     paragraphs.forEach(function(line) {
       if (!line.trim()) return;
       var p = document.createElement("p");
