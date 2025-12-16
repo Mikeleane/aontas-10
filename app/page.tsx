@@ -2143,6 +2143,7 @@ const data = ${dataJson};
   }
 })();
 </script>
+
 </body>
 </html>`;
 
