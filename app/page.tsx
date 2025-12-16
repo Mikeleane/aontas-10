@@ -170,56 +170,56 @@ export default function Home() {
     }
   }
 
-async function handleFetchArticle() {
-  if (!articleUrl.trim()) return;
+  async function handleFetchArticle() {
+    if (!articleUrl.trim()) return;
 
-  setFetchingArticle(true);
-  setArticleError(null);
-  setArticleTitle(null);
+    setFetchingArticle(true);
+    setArticleError(null);
+    setArticleTitle(null);
 
-  try {
-    const res = await fetch("/api/fetch-article", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ url: articleUrl.trim() }),
-    });
-
-    // Read body ONCE
-    const raw = await res.text();
-    let data: any = null;
-
-    // Try to parse JSON, but don't crash if it's not JSON
     try {
-      data = raw ? JSON.parse(raw) : null;
-    } catch (e) {
-      console.error("Non-JSON response from /api/fetch-article:", raw);
-      throw new Error(
-        `Unexpected response from article service (status ${res.status}). Try pasting the text manually.`
+      const res = await fetch("/api/fetch-article", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ url: articleUrl.trim() }),
+      });
+
+      // Read body ONCE
+      const raw = await res.text();
+      let data: any = null;
+
+      // Try to parse JSON, but don't crash if it's not JSON
+      try {
+        data = raw ? JSON.parse(raw) : null;
+      } catch (e) {
+        console.error("Non-JSON response from /api/fetch-article:", raw);
+        throw new Error(
+          `Unexpected response from article service (status ${res.status}). Try pasting the text manually.`
+        );
+      }
+
+      if (!res.ok) {
+        throw new Error(
+          data?.error || `Failed to fetch article text (status ${res.status}).`
+        );
+      }
+
+      if (!data?.text || !data.text.trim()) {
+        throw new Error("Could not extract readable article text.");
+      }
+
+      setArticleTitle(data.title || null);
+      setInputText(data.text);
+    } catch (err: any) {
+      setArticleError(
+        err.message || "Something went wrong fetching the article."
       );
+    } finally {
+      setFetchingArticle(false);
     }
-
-    if (!res.ok) {
-      throw new Error(
-        data?.error || `Failed to fetch article text (status ${res.status}).`
-      );
-    }
-
-    if (!data?.text || !data.text.trim()) {
-      throw new Error("Could not extract readable article text.");
-    }
-
-    setArticleTitle(data.title || null);
-    setInputText(data.text);
-  } catch (err: any) {
-    setArticleError(
-      err.message || "Something went wrong fetching the article."
-    );
-  } finally {
-    setFetchingArticle(false);
   }
-}
 
   // === TEXT EXPORTS ===
 
@@ -292,9 +292,7 @@ async function handleFetchArticle() {
       // Section headings like "=== Reading text (STANDARD version) ==="
       let isSectionHeading = false;
       if (/^===.*===\s*$/.test(trimmed)) {
-        text = trimmed
-          .replace(/^===\s*/, "")
-          .replace(/\s*===\s*$/, "");
+        text = trimmed.replace(/^===\s*/, "").replace(/\s*===\s*$/, "");
         isSectionHeading = true;
       }
 
@@ -411,6 +409,7 @@ async function handleFetchArticle() {
 
     doc.save(filename);
   }
+
   // === FILENAME HELPERS ===
 
   function getSafeSlug() {
@@ -423,13 +422,10 @@ async function handleFetchArticle() {
     const { safeType, safeLevel } = getSafeSlug();
     const prefix = "aontas10";
     if (!stem) {
-      // e.g. "aontas10-article-b1"
       return `${prefix}-${safeType}-${safeLevel}`;
     }
-    // e.g. "aontas10-exercises-standard-article-b1"
     return `${prefix}-${stem}-${safeType}-${safeLevel}`;
   }
-
 
   async function handleDownload() {
     if (!result) return;
@@ -449,7 +445,6 @@ async function handleFetchArticle() {
       });
     }
   }
-
 
   // === INTERACTIVE HTML EXPORT ===
 
@@ -918,8 +913,14 @@ const data = ${dataJson};
   }
 
   function similarity(a, b) {
-    var s1 = (a || "").toLowerCase().replace(/[^a-zà-ÿœæçñüß0-9\\s]/g, "").trim();
-    var s2 = (b || "").toLowerCase().replace(/[^a-zà-ÿœæçñüß0-9\\s]/g, "").trim();
+    var s1 = (a || "")
+      .toLowerCase()
+      .replace(/[^a-zà-ÿœæçñüß0-9\s]/g, "")
+      .trim();
+    var s2 = (b || "")
+      .toLowerCase()
+      .replace(/[^a-zà-ÿœæçñüß0-9\s]/g, "")
+      .trim();
     if (!s1 || !s2) return 0;
     var dist = levenshtein(s1, s2);
     var maxLen = Math.max(s1.length, s2.length);
@@ -980,7 +981,7 @@ const data = ${dataJson};
     readingEl.appendChild(title);
 
     var text = (data.reading && data.reading[mode]) || "";
-    var paragraphs = text.split(/[\\r\\n]+/);
+    var paragraphs = text.split(/[\r\n]+/);
     paragraphs.forEach(function(line) {
       if (!line.trim()) return;
       var p = document.createElement("p");
@@ -1445,7 +1446,6 @@ const data = ${dataJson};
     downloadHtml(html, `${baseName}.html`);
   }
 
-
   // === DEBUG SNAPSHOT ===
 
   function buildDebugSnapshot(): DebugSnapshot | null {
@@ -1500,7 +1500,6 @@ const data = ${dataJson};
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }
-
 
   // === EXERCISE GENERATION ===
 
@@ -1829,7 +1828,7 @@ const data = ${dataJson};
     }
   }
 
-   async function handleDownloadTeacherKey() {
+  async function handleDownloadTeacherKey() {
     if (!exercises || !exercises.length) return;
     const lines = buildTeacherKeyLines();
     if (!lines.length) return;
@@ -1848,8 +1847,7 @@ const data = ${dataJson};
     }
   }
 
-
-    async function handleDownloadStandardCombined() {
+  async function handleDownloadStandardCombined() {
     if (!exercises || !exercises.length || !result) return;
     const lines = buildStandardCombinedLines();
     if (!lines.length) return;
@@ -2118,9 +2116,9 @@ const data = ${dataJson};
                   STANDARD and an ADAPTED version, but they all share a single
                   answer key so the whole class can work together.
                 </p>
-<p className="text-[10px] text-slate-400 mt-1">
-          Selected blocks: {buildSelectedBlocksLabel()}
-        </p>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Selected blocks: {buildSelectedBlocksLabel()}
+                </p>
               </div>
               <button
                 type="button"
