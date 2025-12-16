@@ -366,7 +366,7 @@ export default function Home() {
     URL.revokeObjectURL(url);
   }
 
-  // Updated DOCX export with nicer formatting
+   // Updated DOCX export with nicer formatting
   async function downloadDocx(lines: string[], filename: string) {
     const paragraphs = lines.map((line) => {
       const trimmed = line.trim();
@@ -387,13 +387,15 @@ export default function Home() {
       // Section headings like "=== Reading text (STANDARD version) ==="
       let isSectionHeading = false;
       if (/^===.*===\s*$/.test(trimmed)) {
-        text = trimmed.replace(/^===\s*/, "").replace(/\s*===\s*$/, "");
+        text = trimmed
+          .replace(/^===\s*/, "")
+          .replace(/\s*===\s*$/, "");
         isSectionHeading = true;
       }
 
       const isHeading = isBannerHeading || isSectionHeading;
 
-      // Smaller meta text
+      // Meta / helper text
       const isMeta =
         trimmed.startsWith("Source:") ||
         trimmed.startsWith("Instructions:") ||
@@ -401,27 +403,77 @@ export default function Home() {
         trimmed.startsWith("Level (CEFR):") ||
         trimmed.startsWith("Output type:");
 
+      // QUESTION + OPTION detection
+      const isQuestionLine = /^q\d+\./i.test(trimmed); // "Q1. What is…"
+      const isOptionLine = /^[a-z]\)/i.test(trimmed) || /^-[\s]/.test(trimmed) || /^\s+[a-z]\)/i.test(line);
+      const isNumberedSubLine =
+        !isQuestionLine && /^\d+\.\s+/.test(trimmed); // e.g. "1. The hiring agreement…"
+
+      // Markdown-ish table row like "| Topic | Info |"
+      const isTableLine = /^\|.*\|$/.test(trimmed);
+
       // Font sizes (half-points)
       let fontSize = 22; // ~11pt body
       if (isHeading) fontSize = 26; // ~13pt heading
       if (isMeta) fontSize = 20; // ~10pt meta
+      if (isTableLine) fontSize = 20; // slightly smaller for pseudo-table
 
+      // Bold rules
+      let isBold = false;
+      if (isHeading || isQuestionLine) {
+        isBold = true;
+      }
+
+      // Spacing rules
+      let spacingBefore = 0;
+      let spacingAfter = 80;
+
+      if (isHeading) {
+        spacingBefore = 120;
+        spacingAfter = 160;
+      } else if (isQuestionLine) {
+        // Give each question some air
+        spacingBefore = 120;
+        spacingAfter = 80;
+      } else if (isMeta) {
+        spacingBefore = 40;
+        spacingAfter = 60;
+      } else if (isOptionLine) {
+        spacingBefore = 10;
+        spacingAfter = 40;
+      } else if (isNumberedSubLine) {
+        spacingBefore = 10;
+        spacingAfter = 40;
+      }
+
+      // Base paragraph config
       const paragraphOptions: any = {
         alignment: AlignmentType.LEFT,
         spacing: {
           line: 320, // ~1.3 line spacing
-          after: isHeading ? 160 : 80,
-          before: isHeading ? 120 : 0,
+          after: spacingAfter,
+          before: spacingBefore,
         },
         children: [
           new TextRun({
             text: text || " ",
-            font: "Arial",
+            font: isTableLine ? "Consolas" : "Arial",
             size: fontSize,
-            bold: isHeading,
+            bold: isBold,
           }),
         ],
       };
+
+      // Indent answer options and sub-points so they don't sit on the left edge
+      if (isOptionLine) {
+        paragraphOptions.indent = {
+          left: 720, // ~0.5 inch
+        };
+      } else if (isNumberedSubLine) {
+        paragraphOptions.indent = {
+          left: 360, // ~0.25 inch
+        };
+      }
 
       // Underline section headings with a light border
       if (isSectionHeading) {
@@ -467,6 +519,7 @@ export default function Home() {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }
+
 
   function downloadPdf(
     lines: string[],
