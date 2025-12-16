@@ -38,6 +38,18 @@ type ExercisesResponse = {
   error?: string;
 };
 
+type QuestionGoal = "balanced" | "wh" | "vocab" | "structure" | "exam";
+type Level = "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
+type BlockId = "gist" | "detail" | "trueFalse" | "vocab" | "cloze" | "ordering";
+
+type BlockWeights = Partial<Record<BlockId, number>>;
+
+type GoalScaffold = {
+  label: string;
+  description: string;
+  defaultsByLevel: Record<Level, BlockWeights>;
+};
+
 type DebugSnapshot = {
   timestamp: string;
   appVersion: string;
@@ -59,6 +71,7 @@ type DebugSnapshot = {
     adaptedWordCount: number;
   };
   exercisesConfig: {
+    questionGoal: QuestionGoal;
     includeGist: boolean;
     includeDetail: boolean;
     includeTrueFalse: boolean;
@@ -82,7 +95,7 @@ const languageOptions = [
   "Portuguese",
 ];
 
-const levels = ["A1", "A2", "B1", "B2", "C1", "C2"];
+const levels: Level[] = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const outputTypes = [
   "article",
   "essay",
@@ -93,6 +106,82 @@ const outputTypes = [
   "social media chat",
 ];
 
+const questionGoals: QuestionGoal[] = [
+  "balanced",
+  "wh",
+  "vocab",
+  "structure",
+  "exam",
+];
+
+const goalConfig: Record<QuestionGoal, GoalScaffold> = {
+  balanced: {
+    label: "Balanced comprehension",
+    description:
+      "Mix of gist, detail and some vocabulary – a good all-round reading lesson.",
+    defaultsByLevel: {
+      A1: { gist: 1, detail: 3, trueFalse: 2, vocab: 2 },
+      A2: { gist: 1, detail: 4, trueFalse: 2, vocab: 2, cloze: 1 },
+      B1: { gist: 1, detail: 5, trueFalse: 1, vocab: 2, cloze: 2, ordering: 1 },
+      B2: { gist: 1, detail: 5, vocab: 2, cloze: 2, ordering: 1 },
+      C1: { gist: 1, detail: 4, vocab: 3, cloze: 3, ordering: 2 },
+      C2: { gist: 1, detail: 4, vocab: 3, cloze: 3, ordering: 2 },
+    },
+  },
+  wh: {
+    label: "Who / what / where?",
+    description:
+      "Straightforward wh- questions about people, places and key facts.",
+    defaultsByLevel: {
+      A1: { gist: 1, detail: 4, trueFalse: 3 },
+      A2: { gist: 1, detail: 5, trueFalse: 2, vocab: 1 },
+      B1: { gist: 1, detail: 6, trueFalse: 1, vocab: 1 },
+      B2: { gist: 1, detail: 6, vocab: 2 },
+      C1: { gist: 1, detail: 6, vocab: 2 },
+      C2: { gist: 1, detail: 6, vocab: 2 },
+    },
+  },
+  vocab: {
+    label: "Vocabulary & phrases",
+    description:
+      "Work on meanings in context, useful phrases and some form (parts of speech) where appropriate.",
+    defaultsByLevel: {
+      A1: { vocab: 4, trueFalse: 1, cloze: 1, detail: 2, gist: 1 },
+      A2: { vocab: 5, cloze: 2, detail: 2, trueFalse: 1 },
+      B1: { vocab: 4, cloze: 3, detail: 2, trueFalse: 1 },
+      B2: { vocab: 4, cloze: 3, detail: 2 },
+      C1: { vocab: 4, cloze: 3, detail: 2 },
+      C2: { vocab: 4, cloze: 3, detail: 2 },
+    },
+  },
+  structure: {
+    label: "Text structure & sequencing",
+    description:
+      "Focus on ordering, paragraph flow and how the text is organised.",
+    defaultsByLevel: {
+      A1: { gist: 2, ordering: 2, detail: 2, trueFalse: 2 },
+      A2: { gist: 1, ordering: 3, detail: 2, trueFalse: 2, cloze: 1 },
+      B1: { gist: 1, ordering: 3, detail: 3, cloze: 1 },
+      B2: { gist: 1, ordering: 4, detail: 3 },
+      C1: { gist: 1, ordering: 4, detail: 3, cloze: 1 },
+      C2: { gist: 1, ordering: 4, detail: 3, cloze: 1 },
+    },
+  },
+  exam: {
+    label: "Exam-style reading",
+    description:
+      "Closer to exam papers: more detail, cloze and options, tuned to the CEFR level.",
+    defaultsByLevel: {
+      A1: { detail: 4, trueFalse: 3, vocab: 1, cloze: 1, gist: 1 },
+      A2: { detail: 5, trueFalse: 3, vocab: 1, cloze: 1, gist: 1 },
+      B1: { detail: 5, cloze: 3, vocab: 2, gist: 1, ordering: 1 },
+      B2: { detail: 5, cloze: 3, vocab: 2, gist: 1, ordering: 1 },
+      C1: { detail: 4, cloze: 4, vocab: 3, gist: 1, ordering: 2 },
+      C2: { detail: 4, cloze: 4, vocab: 3, gist: 1, ordering: 2 },
+    },
+  },
+};
+
 function countWords(text: string): number {
   const trimmed = text.trim();
   if (!trimmed) return 0;
@@ -102,7 +191,7 @@ function countWords(text: string): number {
 export default function Home() {
   const [inputText, setInputText] = useState("");
   const [outputLanguage, setOutputLanguage] = useState(languageOptions[0]);
-  const [level, setLevel] = useState("B1");
+  const [level, setLevel] = useState<Level>("B1");
   const [outputType, setOutputType] = useState("article");
   const [dyslexiaFriendly, setDyslexiaFriendly] = useState(true);
 
@@ -124,6 +213,9 @@ export default function Home() {
   const [includeVocab, setIncludeVocab] = useState(true);
   const [includeCloze, setIncludeCloze] = useState(false);
   const [includeOrdering, setIncludeOrdering] = useState(false);
+
+  const [questionGoal, setQuestionGoal] =
+    useState<QuestionGoal>("balanced");
 
   const [exercises, setExercises] = useState<ExerciseItem[] | null>(null);
   const [loadingExercises, setLoadingExercises] = useState(false);
@@ -202,7 +294,8 @@ export default function Home() {
 
       if (!res.ok) {
         throw new Error(
-          data?.error || `Failed to fetch article text (status ${res.status}).`
+          data?.error ||
+            `Failed to fetch article text (status ${res.status}).`
         );
       }
 
@@ -232,7 +325,9 @@ export default function Home() {
     lines.push(`Output language: ${outputLanguage}`);
     lines.push(`Level: ${level}`);
     lines.push(`Output type: ${outputType}`);
-    lines.push(`Dyslexia-friendly: ${dyslexiaFriendly ? "yes" : "no"}`);
+    lines.push(
+      `Dyslexia-friendly: ${dyslexiaFriendly ? "yes" : "no"}`
+    );
     if (articleUrl.trim()) {
       lines.push(`Source URL: ${articleUrl.trim()}`);
     }
@@ -1472,6 +1567,7 @@ const data = ${dataJson};
         adaptedWordCount: countWords(result.adaptedOutput),
       },
       exercisesConfig: {
+        questionGoal,
         includeGist,
         includeDetail,
         includeTrueFalse,
@@ -1502,6 +1598,18 @@ const data = ${dataJson};
   }
 
   // === EXERCISE GENERATION ===
+
+  function applyGoalDefaults(goal: QuestionGoal, lvl: Level) {
+    const cfg = goalConfig[goal];
+    const weights = cfg.defaultsByLevel[lvl];
+
+    setIncludeGist(!!weights.gist);
+    setIncludeDetail(!!weights.detail);
+    setIncludeTrueFalse(!!weights.trueFalse);
+    setIncludeVocab(!!weights.vocab);
+    setIncludeCloze(!!weights.cloze);
+    setIncludeOrdering(!!weights.ordering);
+  }
 
   async function handleGenerateExercises() {
     if (!result) return;
@@ -1534,6 +1642,15 @@ const data = ${dataJson};
           outputLanguage,
           level,
           outputType,
+          questionGoal,
+          blockWeights: {
+            gist: includeGist ? 1 : 0,
+            detail: includeDetail ? 1 : 0,
+            trueFalse: includeTrueFalse ? 1 : 0,
+            vocab: includeVocab ? 1 : 0,
+            cloze: includeCloze ? 1 : 0,
+            ordering: includeOrdering ? 1 : 0,
+          },
           includeGist,
           includeDetail,
           includeTrueFalse,
@@ -1663,6 +1780,11 @@ const data = ${dataJson};
       lines.push(`Source URL: ${articleUrl.trim()}`);
     }
     lines.push(`Exercise blocks: ${buildSelectedBlocksLabel()}`);
+    lines.push(
+      `Question focus: ${
+        goalConfig[questionGoal]?.label || questionGoal
+      }`
+    );
     lines.push(
       `Standard text length: ~${standardWords} words · Adapted text length: ~${adaptedWords} words`
     );
@@ -1980,11 +2102,13 @@ const data = ${dataJson};
             </div>
 
             <div className="space-y-1">
-              <label className="block text-sm font-medium">Level (CEFR)</label>
+              <label className="block text-sm font-medium">
+                Level (CEFR)
+              </label>
               <select
                 className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-500"
                 value={level}
-                onChange={(e) => setLevel(e.target.value)}
+                onChange={(e) => setLevel(e.target.value as Level)}
               >
                 {levels.map((lvl) => (
                   <option key={lvl} value={lvl}>
@@ -2132,6 +2256,44 @@ const data = ${dataJson};
               </button>
             </div>
 
+            {/* Question focus + presets */}
+            <div className="grid gap-3 md:grid-cols-2 text-xs mt-2">
+              <div className="space-y-1">
+                <label className="block font-medium">Question focus</label>
+                <select
+                  className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-sky-500"
+                  value={questionGoal}
+                  onChange={(e) =>
+                    setQuestionGoal(e.target.value as QuestionGoal)
+                  }
+                >
+                  {questionGoals.map((goalKey) => (
+                    <option key={goalKey} value={goalKey}>
+                      {goalConfig[goalKey].label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-slate-400">
+                  {goalConfig[questionGoal].description}
+                </p>
+              </div>
+              <div className="space-y-1">
+                <label className="block font-medium">Quick presets</label>
+                <button
+                  type="button"
+                  onClick={() => applyGoalDefaults(questionGoal, level)}
+                  className="inline-flex items-center justify-center rounded-md bg-slate-800 px-3 py-1.5 text-[11px] font-medium text-slate-100"
+                >
+                  Apply for level {level}
+                </button>
+                <p className="text-[10px] text-slate-400">
+                  This toggles the blocks below based on your focus and CEFR
+                  level. You can still tweak them manually.
+                </p>
+              </div>
+            </div>
+
+            {/* Block checkboxes */}
             <div className="grid gap-2 md:grid-cols-3 text-xs mt-2">
               <label className="inline-flex items-center gap-2">
                 <input
