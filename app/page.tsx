@@ -7,7 +7,12 @@ import {
   Paragraph,
   TextRun,
   AlignmentType,
+  Table,
+  TableRow,
+  TableCell,
+  WidthType,
 } from "docx";
+
 import jsPDF from "jspdf";
 
 type AdaptResponse = {
@@ -366,13 +371,16 @@ export default function Home() {
     URL.revokeObjectURL(url);
   }
 
-   // Updated DOCX export with nicer formatting
+     // Updated DOCX export with nicer formatting + real tables
   async function downloadDocx(lines: string[], filename: string) {
-    const paragraphs = lines.map((line) => {
+    const blocks: (Paragraph | Table)[] = [];
+
+    // Turn a single text line into a styled paragraph
+    function makeParagraph(line: string): Paragraph {
       const trimmed = line.trim();
       let text = line || " ";
 
-      // Banner-style headings
+      // Banner-style headings (top titles etc.)
       const isBannerHeading =
         trimmed.startsWith("Aontas-10") ||
         trimmed.startsWith("Standard Reading") ||
@@ -387,93 +395,45 @@ export default function Home() {
       // Section headings like "=== Reading text (STANDARD version) ==="
       let isSectionHeading = false;
       if (/^===.*===\s*$/.test(trimmed)) {
-        text = trimmed
-          .replace(/^===\s*/, "")
-          .replace(/\s*===\s*$/, "");
+        text = trimmed.replace(/^===\s*/, "").replace(/\s*===\s*$/, "");
         isSectionHeading = true;
       }
 
       const isHeading = isBannerHeading || isSectionHeading;
 
-      // Meta / helper text
+      // Smaller meta text
       const isMeta =
         trimmed.startsWith("Source:") ||
-        trimmed.startsWith("Instructions:") ||
+        trimmed.startsWith("Source title:") ||
+        trimmed.startsWith("Source URL:") ||
+        trimmed.startsWith("Exercise blocks:") ||
         trimmed.startsWith("Output language:") ||
         trimmed.startsWith("Level (CEFR):") ||
-        trimmed.startsWith("Output type:");
-
-      // QUESTION + OPTION detection
-      const isQuestionLine = /^q\d+\./i.test(trimmed); // "Q1. What is…"
-      const isOptionLine = /^[a-z]\)/i.test(trimmed) || /^-[\s]/.test(trimmed) || /^\s+[a-z]\)/i.test(line);
-      const isNumberedSubLine =
-        !isQuestionLine && /^\d+\.\s+/.test(trimmed); // e.g. "1. The hiring agreement…"
-
-      // Markdown-ish table row like "| Topic | Info |"
-      const isTableLine = /^\|.*\|$/.test(trimmed);
+        trimmed.startsWith("Output type:") ||
+        trimmed.startsWith("Standard text length:") ||
+        trimmed.startsWith("Note:");
 
       // Font sizes (half-points)
       let fontSize = 22; // ~11pt body
       if (isHeading) fontSize = 26; // ~13pt heading
       if (isMeta) fontSize = 20; // ~10pt meta
-      if (isTableLine) fontSize = 20; // slightly smaller for pseudo-table
 
-      // Bold rules
-      let isBold = false;
-      if (isHeading || isQuestionLine) {
-        isBold = true;
-      }
-
-      // Spacing rules
-      let spacingBefore = 0;
-      let spacingAfter = 80;
-
-      if (isHeading) {
-        spacingBefore = 120;
-        spacingAfter = 160;
-      } else if (isQuestionLine) {
-        // Give each question some air
-        spacingBefore = 120;
-        spacingAfter = 80;
-      } else if (isMeta) {
-        spacingBefore = 40;
-        spacingAfter = 60;
-      } else if (isOptionLine) {
-        spacingBefore = 10;
-        spacingAfter = 40;
-      } else if (isNumberedSubLine) {
-        spacingBefore = 10;
-        spacingAfter = 40;
-      }
-
-      // Base paragraph config
       const paragraphOptions: any = {
         alignment: AlignmentType.LEFT,
         spacing: {
           line: 320, // ~1.3 line spacing
-          after: spacingAfter,
-          before: spacingBefore,
+          after: isHeading ? 160 : 80,
+          before: isHeading ? 120 : 0,
         },
         children: [
           new TextRun({
             text: text || " ",
-            font: isTableLine ? "Consolas" : "Arial",
+            font: "Arial",
             size: fontSize,
-            bold: isBold,
+            bold: isHeading,
           }),
         ],
       };
-
-      // Indent answer options and sub-points so they don't sit on the left edge
-      if (isOptionLine) {
-        paragraphOptions.indent = {
-          left: 720, // ~0.5 inch
-        };
-      } else if (isNumberedSubLine) {
-        paragraphOptions.indent = {
-          left: 360, // ~0.25 inch
-        };
-      }
 
       // Underline section headings with a light border
       if (isSectionHeading) {
@@ -488,7 +448,96 @@ export default function Home() {
       }
 
       return new Paragraph(paragraphOptions);
-    });
+    }
+
+    // Convert a Markdown-style table block into a real DOCX table
+    function buildTableFromMarkdown(tableLines: string[]): Table {
+      const rows: TableRow[] = [];
+      let headerDone = false;
+
+      tableLines.forEach((raw) => {
+        const parts = raw
+          .split("|")
+          .slice(1, -1)
+          .map((p) => p.trim());
+
+        if (!parts.length) return;
+
+        // Skip separator row like |----|-----|
+        const isSeparatorRow = parts.every((cell) =>
+          /^-+$/.test(cell.replace(/:/g, ""))
+        );
+        if (isSeparatorRow) return;
+
+        const isHeader = !headerDone;
+        if (!headerDone) headerDone = true;
+
+        const cells = parts.map(
+          (cellText) =>
+            new TableCell({
+              children: [
+                new Paragraph({
+                  children: [
+                    new TextRun({
+                      text: cellText || " ",
+                      bold: isHeader,
+                      font: "Arial",
+                      size: 22,
+                    }),
+                  ],
+                }),
+              ],
+            })
+        );
+
+        rows.push(new TableRow({ children: cells }));
+      });
+
+      if (!rows.length) {
+        // Fallback: stuff the raw lines into a single cell
+        return new Table({
+          rows: [
+            new TableRow({
+              children: [
+                new TableCell({
+                  children: tableLines.map((l) => makeParagraph(l)),
+                }),
+              ],
+            }),
+          ],
+        });
+      }
+
+      return new Table({
+        width: {
+          size: 100,
+          type: WidthType.PERCENTAGE,
+        },
+        rows,
+      });
+    }
+
+    // Walk through all lines and decide: paragraph or table?
+    let i = 0;
+    while (i < lines.length) {
+      const raw = lines[i];
+      const trimmed = raw.trim();
+
+      // Markdown table block: consecutive lines starting with "|"
+      if (trimmed.startsWith("|") && trimmed.indexOf("|", 1) !== -1) {
+        const tableLines: string[] = [];
+        while (i < lines.length && lines[i].trim().startsWith("|")) {
+          tableLines.push(lines[i].trim());
+          i++;
+        }
+        blocks.push(buildTableFromMarkdown(tableLines));
+        continue;
+      }
+
+      // Normal paragraph line
+      blocks.push(makeParagraph(raw));
+      i++;
+    }
 
     // Narrow margins: ~2cm top/bottom, 1.5cm left/right
     const doc = new Document({
@@ -504,7 +553,7 @@ export default function Home() {
               },
             },
           },
-          children: paragraphs,
+          children: blocks,
         },
       ],
     });
@@ -1731,7 +1780,66 @@ const data = ${dataJson};
     }
   }
 
-  // === EXERCISE EXPORT HELPERS ===
+   // === EXERCISE EXPORT HELPERS ===
+
+  function splitPromptLines(raw: string | undefined | null): string[] {
+    if (!raw) return [];
+    return raw
+      .split(/\r?\n/)
+      .map((line) => line.trimEnd())
+      .filter((line) => line.trim() !== "");
+  }
+
+  function addQuestionBlock(
+    lines: string[],
+    item: ExerciseItem,
+    side: "standard" | "adapted"
+  ) {
+    const sideData = side === "standard" ? item.standard : item.adapted;
+    const promptLines = splitPromptLines(sideData.prompt);
+
+    if (!promptLines.length) {
+      lines.push(`Q${item.id}.`);
+    } else {
+      // First line with Q number
+      lines.push(`Q${item.id}. ${promptLines[0]}`);
+      // Subsequent lines indented (so “Headings: A. …” etc don’t sit in a single clump)
+      for (let i = 1; i < promptLines.length; i++) {
+        lines.push(`   ${promptLines[i]}`);
+      }
+    }
+
+    // Multiple-choice options, if present
+    if (sideData.options && sideData.options.length) {
+      sideData.options.forEach((opt, idx) => {
+        const label = String.fromCharCode(97 + idx); // a, b, c...
+        lines.push(`   ${label}) ${opt}`);
+      });
+    }
+
+    lines.push("");
+  }
+
+  function addPromptBlock(
+    lines: string[],
+    label: string,
+    prompt: string | undefined
+  ) {
+    const promptLines = splitPromptLines(prompt || "");
+    const baseIndent = "  ";
+
+    if (!promptLines.length) {
+      lines.push(`${baseIndent}${label}:`);
+      return;
+    }
+
+    // First line with label
+    lines.push(`${baseIndent}${label}: ${promptLines[0]}`);
+    // Subsequent lines further indented
+    for (let i = 1; i < promptLines.length; i++) {
+      lines.push(`${baseIndent}   ${promptLines[i]}`);
+    }
+  }
 
   function buildSelectedBlocksLabel(): string {
     const blocks: string[] = [];
@@ -1757,6 +1865,9 @@ const data = ${dataJson};
     if (articleUrl.trim()) {
       lines.push(`Source: ${articleUrl.trim()}`);
     }
+    lines.push(
+      `Exercise blocks: ${buildSelectedBlocksLabel()}`
+    );
     lines.push("");
     lines.push(
       "Instructions: Answer the questions below. Use the STANDARD version of the text."
@@ -1764,17 +1875,7 @@ const data = ${dataJson};
     lines.push("");
 
     const sorted = [...exercises].sort((a, b) => a.id - b.id);
-
-    sorted.forEach((item) => {
-      lines.push(`Q${item.id}. ${item.standard.prompt}`);
-      if (item.standard.options && item.standard.options.length) {
-        item.standard.options.forEach((opt, idx) => {
-          const label = String.fromCharCode(97 + idx);
-          lines.push(`   ${label}) ${opt}`);
-        });
-      }
-      lines.push("");
-    });
+    sorted.forEach((item) => addQuestionBlock(lines, item, "standard"));
 
     return lines;
   }
@@ -1792,6 +1893,9 @@ const data = ${dataJson};
     if (articleUrl.trim()) {
       lines.push(`Source: ${articleUrl.trim()}`);
     }
+    lines.push(
+      `Exercise blocks: ${buildSelectedBlocksLabel()}`
+    );
     lines.push("");
     lines.push(
       "Instructions: Answer the questions below. Use the ADAPTED version of the text."
@@ -1799,17 +1903,7 @@ const data = ${dataJson};
     lines.push("");
 
     const sorted = [...exercises].sort((a, b) => a.id - b.id);
-
-    sorted.forEach((item) => {
-      lines.push(`Q${item.id}. ${item.adapted.prompt}`);
-      if (item.adapted.options && item.adapted.options.length) {
-        item.adapted.options.forEach((opt, idx) => {
-          const label = String.fromCharCode(97 + idx);
-          lines.push(`   ${label}) ${opt}`);
-        });
-      }
-      lines.push("");
-    });
+    sorted.forEach((item) => addQuestionBlock(lines, item, "adapted"));
 
     return lines;
   }
@@ -1835,11 +1929,6 @@ const data = ${dataJson};
     }
     lines.push(`Exercise blocks: ${buildSelectedBlocksLabel()}`);
     lines.push(
-      `Question focus: ${
-        goalConfig[questionGoal]?.label || questionGoal
-      }`
-    );
-    lines.push(
       `Standard text length: ~${standardWords} words · Adapted text length: ~${adaptedWords} words`
     );
     lines.push(
@@ -1854,7 +1943,9 @@ const data = ${dataJson};
 
     sorted.forEach((item) => {
       lines.push(`Q${item.id} – type: ${item.type}, skill: ${item.skill}`);
-      lines.push(`  Standard prompt: ${item.standard.prompt}`);
+      lines.push("");
+
+      addPromptBlock(lines, "Standard prompt", item.standard.prompt);
       if (item.standard.options && item.standard.options.length) {
         lines.push("  Standard options:");
         item.standard.options.forEach((opt, idx) => {
@@ -1862,7 +1953,9 @@ const data = ${dataJson};
           lines.push(`    ${label}) ${opt}`);
         });
       }
-      lines.push(`  Adapted prompt: ${item.adapted.prompt}`);
+
+      lines.push("");
+      addPromptBlock(lines, "Adapted prompt", item.adapted.prompt);
       if (item.adapted.options && item.adapted.options.length) {
         lines.push("  Adapted options:");
         item.adapted.options.forEach((opt, idx) => {
@@ -1870,6 +1963,7 @@ const data = ${dataJson};
           lines.push(`    ${label}) ${opt}`);
         });
       }
+
       const answerText = Array.isArray(item.answer)
         ? item.answer.join(" | ")
         : item.answer;
@@ -1894,8 +1988,10 @@ const data = ${dataJson};
     if (articleUrl.trim()) {
       lines.push(`Source: ${articleUrl.trim()}`);
     }
+    lines.push(
+      `Exercise blocks: ${buildSelectedBlocksLabel()}`
+    );
     lines.push("");
-
     lines.push("=== Reading text (STANDARD version) ===");
 
     result.standardOutput.split(/\r?\n/).forEach((line) => lines.push(line));
@@ -1908,17 +2004,7 @@ const data = ${dataJson};
     lines.push("");
 
     const sorted = [...exercises].sort((a, b) => a.id - b.id);
-
-    sorted.forEach((item) => {
-      lines.push(`Q${item.id}. ${item.standard.prompt}`);
-      if (item.standard.options && item.standard.options.length) {
-        item.standard.options.forEach((opt, idx) => {
-          const label = String.fromCharCode(97 + idx);
-          lines.push(`   ${label}) ${opt}`);
-        });
-      }
-      lines.push("");
-    });
+    sorted.forEach((item) => addQuestionBlock(lines, item, "standard"));
 
     return lines;
   }
@@ -1935,8 +2021,10 @@ const data = ${dataJson};
     if (articleUrl.trim()) {
       lines.push(`Source: ${articleUrl.trim()}`);
     }
+    lines.push(
+      `Exercise blocks: ${buildSelectedBlocksLabel()}`
+    );
     lines.push("");
-
     lines.push("=== Reading text (ADAPTED version) ===");
 
     result.adaptedOutput.split(/\r?\n/).forEach((line) => lines.push(line));
@@ -1949,17 +2037,7 @@ const data = ${dataJson};
     lines.push("");
 
     const sorted = [...exercises].sort((a, b) => a.id - b.id);
-
-    sorted.forEach((item) => {
-      lines.push(`Q${item.id}. ${item.adapted.prompt}`);
-      if (item.adapted.options && item.adapted.options.length) {
-        item.adapted.options.forEach((opt, idx) => {
-          const label = String.fromCharCode(97 + idx);
-          lines.push(`   ${label}) ${opt}`);
-        });
-      }
-      lines.push("");
-    });
+    sorted.forEach((item) => addQuestionBlock(lines, item, "adapted"));
 
     return lines;
   }
