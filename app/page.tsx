@@ -1161,6 +1161,66 @@ export default function Home() {
       grid-template-columns: minmax(0, 1fr);
     }
   }
+
+  /* --- Ordering game --- */
+  .ordering-list {
+    margin-top: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .ordering-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    font-size: 0.9em;
+  }
+  .ordering-text {
+    flex: 1;
+    margin-right: 8px;
+  }
+  .ordering-controls button {
+    font-size: 11px;
+    padding: 2px 4px;
+    margin-left: 4px;
+    border-radius: 4px;
+    border: 1px solid #d1d5db;
+    background: #f3f4f6;
+    cursor: pointer;
+  }
+
+  /* --- Cloze word bank --- */
+  .cloze-blanks label {
+    display: block;
+    margin-bottom: 4px;
+  }
+  .cloze-word-bank {
+    margin-top: 6px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+    font-size: 0.85em;
+  }
+  .cloze-word-bank-label {
+    font-weight: 600;
+    margin-right: 4px;
+  }
+  .cloze-token {
+    border-radius: 999px;
+    border: 1px solid #d1d5db;
+    padding: 3px 8px;
+    background: #f3f4f6;
+    cursor: pointer;
+  }
+  .cloze-token:hover {
+    background: #e5e7eb;
+  }
+
 </style>
 </head>
 <body>
@@ -1293,7 +1353,7 @@ export default function Home() {
 <script>
 const data = ${dataJson};
 
-(function() {
+(function(){
   var modeButtons = document.querySelectorAll(".mode-btn");
   var readingEl = document.getElementById("reading");
   var questionsEl = document.getElementById("questions");
@@ -1304,15 +1364,6 @@ const data = ${dataJson};
   var dictPanel = document.getElementById("dict-panel");
   var pronouncePanel = document.getElementById("pronounce-panel");
   var voiceSel = document.getElementById("tts-voice");
-  var levelPill = document.getElementById("level-pill");
-  var modePill = document.getElementById("mode-pill");
-  var progressLabel = document.getElementById("progress-label");
-  var progressFill = document.getElementById("progress-fill");
-  var listeningPlay = document.getElementById("listening-play");
-  var listeningToggleText = document.getElementById("listening-toggle-text");
-  var listeningStatus = document.getElementById("listening-status");
-  var routeText = document.getElementById("route-text");
-  var vocabChips = document.getElementById("vocab-chips");
 
   var synthSupported = "speechSynthesis" in window && "SpeechSynthesisUtterance" in window;
   var currentUtterance = null;
@@ -1322,6 +1373,7 @@ const data = ${dataJson};
   var recogSupported = !!Recognition;
   var recognizer = recogSupported ? new Recognition() : null;
   var currentTargetPhrase = "";
+  var currentClozeTarget = null; // which blank to fill from the word bank
 
   function setTtsStatus(msg) {
     var el = document.getElementById("tts-status");
@@ -1330,7 +1382,7 @@ const data = ${dataJson};
   }
 
   function guessLangCode() {
-    var lang = (data.meta && data.meta.outputLanguage || "").toLowerCase();
+    var lang = (data.meta.outputLanguage || "").toLowerCase();
     if (lang.indexOf("irish") !== -1) return "ga-IE";
     if (lang.indexOf("french") !== -1) return "fr-FR";
     if (lang.indexOf("german") !== -1) return "de-DE";
@@ -1364,7 +1416,7 @@ const data = ${dataJson};
     var fallback = [];
 
     all.forEach(function(v) {
-      if (langCode && v.lang && v.lang.toLowerCase().indexOf(langCode.toLowerCase().slice(0, 2)) === 0) {
+      if (langCode && v.lang && v.lang.toLowerCase().indexOf(langCode.toLowerCase().slice(0,2)) === 0) {
         primary.push(v);
       } else {
         fallback.push(v);
@@ -1418,9 +1470,9 @@ const data = ${dataJson};
     }
 
     currentUtterance = u;
-    u.onstart = function() { setTtsStatus("Reading..."); };
-    u.onend = function() { setTtsStatus("Done"); };
-    u.onerror = function() { setTtsStatus("Error"); };
+    u.onstart = function(){ setTtsStatus("Reading..."); };
+    u.onend = function(){ setTtsStatus("Done"); };
+    u.onerror = function(){ setTtsStatus("Error"); };
     window.speechSynthesis.speak(u);
   }
 
@@ -1438,11 +1490,11 @@ const data = ${dataJson};
     }
     for (var i2 = 1; i2 <= m; i2++) {
       for (var j2 = 1; j2 <= n; j2++) {
-        var cost = a.charAt(i2 - 1) === b.charAt(j2 - 1) ? 0 : 1;
+        var cost = a.charAt(i2-1) === b.charAt(j2-1) ? 0 : 1;
         dp[i2][j2] = Math.min(
-          dp[i2 - 1][j2] + 1,
-          dp[i2][j2 - 1] + 1,
-          dp[i2 - 1][j2 - 1] + cost
+          dp[i2-1][j2] + 1,
+          dp[i2][j2-1] + 1,
+          dp[i2-1][j2-1] + cost
         );
       }
     }
@@ -1450,8 +1502,8 @@ const data = ${dataJson};
   }
 
   function similarity(a, b) {
-    var s1 = (a || "").toLowerCase().replace(/[^a-z\\u00C0-\\u024f0-9\\s]/g, "").trim();
-    var s2 = (b || "").toLowerCase().replace(/[^a-z\\u00C0-\\u024f0-9\\s]/g, "").trim();
+    var s1 = (a || "").toLowerCase().replace(/[^a-zà-ÿœæçñüß0-9\s]/g, "").trim();
+    var s2 = (b || "").toLowerCase().replace(/[^a-zà-ÿœæçñüß0-9\s]/g, "").trim();
     if (!s1 || !s2) return 0;
     var dist = levenshtein(s1, s2);
     var maxLen = Math.max(s1.length, s2.length);
@@ -1461,78 +1513,23 @@ const data = ${dataJson};
   function buildVocabIndex() {
     var vocab = {};
     (data.exercises || []).forEach(function(item) {
-      if (!item || !item.type) return;
-      var t = (item.type || "").toLowerCase();
-      if (t.indexOf("vocab") === -1) return;
-
-      var ans = item.answer;
-      var meaning = Array.isArray(ans) ? ans.join("; ") : String(ans || "");
-      var prompt = (item.standard && item.standard.prompt) || "";
-      var match = prompt.match(/["“”'‘’](.+?)["“”'‘’]/);
-      if (match && match[1]) {
-        var word = match[1].trim();
-        if (word) {
-          vocab[word.toLowerCase()] = { word: word, meaning: meaning };
+      if (item.type === "vocab") {
+        var ans = item.answer;
+        var meaning = Array.isArray(ans) ? ans.join("; ") : String(ans || "");
+        var prompt = (item.standard && item.standard.prompt) || "";
+        var match = prompt.match(/["“”'‘’](.+?)["“”'‘’]/);
+        if (match && match[1]) {
+          var word = match[1].trim();
+          if (word) {
+            vocab[word.toLowerCase()] = { word: word, meaning: meaning };
+          }
         }
       }
     });
     return vocab;
   }
 
-  function buildFallbackVocabFromReading() {
-    var text = getReadingTextForMode("standard") || getReadingTextForMode("adapted");
-    var words = (text || "").toLowerCase().match(/[a-z\\u00C0-\\u024f]{4,}/g) || [];
-    var seen = {};
-    var out = [];
-    for (var i = 0; i < words.length; i++) {
-      var w = words[i];
-      if (!seen[w]) {
-        seen[w] = true;
-        out.push({ word: w, meaning: "" });
-      }
-      if (out.length >= 12) break;
-    }
-    return out;
-  }
-
   var vocabIndex = buildVocabIndex();
-
-  function renderVocabChips() {
-    if (!vocabChips) return;
-
-    var entries = [];
-    for (var k in vocabIndex) {
-      if (Object.prototype.hasOwnProperty.call(vocabIndex, k)) {
-        entries.push(vocabIndex[k]);
-      }
-    }
-    if (!entries.length) {
-      entries = buildFallbackVocabFromReading();
-    }
-
-    vocabChips.innerHTML = "";
-    if (!entries.length) {
-      var span = document.createElement("span");
-      span.textContent = "No vocabulary items detected in this worksheet.";
-      span.style.fontSize = "0.75rem";
-      span.style.color = "#9ca3af";
-      vocabChips.appendChild(span);
-      return;
-    }
-
-    entries.slice(0, 12).forEach(function(entry) {
-      var btn = document.createElement("button");
-      btn.type = "button";
-      btn.className = "chip";
-      btn.textContent = entry.word;
-      btn.addEventListener("click", function() {
-        currentTargetPhrase = entry.word;
-        speakText(entry.word);
-        showDictMessage(entry.word, entry.meaning || "No stored definition in this worksheet.");
-      });
-      vocabChips.appendChild(btn);
-    });
-  }
 
   function renderHeader() {
     headerEl.innerHTML = "";
@@ -1558,13 +1555,6 @@ const data = ${dataJson};
       pMeta.textContent = metaBits.join(" · ");
       headerEl.appendChild(pMeta);
     }
-
-    if (levelPill) {
-      levelPill.textContent = data.meta.level ? data.meta.level : "?";
-    }
-    if (modePill) {
-      modePill.textContent = "reading";
-    }
   }
 
   function renderReading(mode) {
@@ -1574,13 +1564,126 @@ const data = ${dataJson};
     readingEl.appendChild(title);
 
     var text = (data.reading && data.reading[mode]) || "";
-    var paragraphs = text.split(/[\\r\\n]+/);
+    var paragraphs = text.split(/[\r\n]+/);
     paragraphs.forEach(function(line) {
       if (!line.trim()) return;
       var p = document.createElement("p");
       p.textContent = line;
       readingEl.appendChild(p);
     });
+  }
+
+  // --- NEW: ordering and cloze renderers ---
+
+  function renderOrderingQuestion(container, item) {
+    var list = document.createElement("div");
+    list.className = "ordering-list";
+
+    var steps = Array.isArray(item.answer)
+      ? item.answer.slice()
+      : [String(item.answer || "")];
+
+    // randomise initial order a little
+    steps.sort(function() { return Math.random() - 0.5; });
+
+    steps.forEach(function(step) {
+      var card = document.createElement("div");
+      card.className = "ordering-card";
+      card.setAttribute("data-value", step);
+
+      var textSpan = document.createElement("span");
+      textSpan.className = "ordering-text";
+      textSpan.textContent = step;
+      card.appendChild(textSpan);
+
+      var controls = document.createElement("div");
+      controls.className = "ordering-controls";
+
+      var upBtn = document.createElement("button");
+      upBtn.type = "button";
+      upBtn.textContent = "▲";
+      upBtn.title = "Move up";
+      upBtn.addEventListener("click", function() {
+        var parent = card.parentNode;
+        if (!parent) return;
+        var prev = card.previousElementSibling;
+        if (prev) {
+          parent.insertBefore(card, prev);
+        }
+      });
+
+      var downBtn = document.createElement("button");
+      downBtn.type = "button";
+      downBtn.textContent = "▼";
+      downBtn.title = "Move down";
+      downBtn.addEventListener("click", function() {
+        var parent = card.parentNode;
+        if (!parent) return;
+        var next = card.nextElementSibling;
+        if (next) {
+          parent.insertBefore(next, card);
+        }
+      });
+
+      controls.appendChild(upBtn);
+      controls.appendChild(downBtn);
+      card.appendChild(controls);
+
+      list.appendChild(card);
+    });
+
+    container.appendChild(list);
+  }
+
+  function renderClozeQuestion(container, item) {
+    var ans = item.answer;
+    var blanksCount = Array.isArray(ans) ? ans.length : 1;
+
+    var blanks = document.createElement("div");
+    blanks.className = "blanks cloze-blanks";
+
+    for (var i = 0; i < blanksCount; i++) {
+      var lab = document.createElement("label");
+      lab.textContent = "Blank " + (i + 1) + ": ";
+      var input = document.createElement("input");
+      input.type = "text";
+      input.setAttribute("data-blank", String(i));
+      input.name = "q" + item.id + "_blank" + i;
+      input.addEventListener("focus", function(ev) {
+        currentClozeTarget = ev.target;
+      });
+      lab.appendChild(input);
+      blanks.appendChild(lab);
+    }
+
+    container.appendChild(blanks);
+
+    var bankContainer = document.createElement("div");
+    bankContainer.className = "cloze-word-bank";
+
+    var title = document.createElement("div");
+    title.className = "cloze-word-bank-label";
+    title.textContent = "Word bank:";
+    bankContainer.appendChild(title);
+
+    var words = Array.isArray(ans) ? ans.slice() : [String(ans || "")];
+    words.sort(function() { return Math.random() - 0.5; });
+
+    words.forEach(function(word) {
+      var token = document.createElement("button");
+      token.type = "button";
+      token.className = "cloze-token";
+      token.textContent = word;
+      token.addEventListener("click", function() {
+        if (currentClozeTarget) {
+          currentClozeTarget.value = word;
+          currentClozeTarget.focus();
+        }
+      });
+      bankContainer.appendChild(token);
+    });
+
+    container.appendChild(bankContainer);
   }
 
   function renderQuestions(mode) {
@@ -1605,12 +1708,17 @@ const data = ${dataJson};
       prompt.textContent = "Q" + item.id + ". " + side.prompt;
       container.appendChild(prompt);
 
-      var metaLine = document.createElement("div");
-      metaLine.className = "question-meta";
-      metaLine.textContent = "Block: " + (item.type || "–") + " · Skill: " + (item.skill || "–");
-      container.appendChild(metaLine);
+      var qType = (item.type || "").toLowerCase();
+      var qSkill = (item.skill || "").toLowerCase();
+      var ans = item.answer;
+      var isOrdering = qType.indexOf("order") !== -1 || qSkill.indexOf("order") !== -1;
+      var isCloze = qType.indexOf("cloze") !== -1 || qSkill.indexOf("cloze") !== -1;
 
-      if (side.options && side.options.length) {
+      if (isOrdering) {
+        renderOrderingQuestion(container, item);
+      } else if (isCloze) {
+        renderClozeQuestion(container, item);
+      } else if (side.options && side.options.length) {
         var opts = document.createElement("div");
         opts.className = "options";
         side.options.forEach(function(opt, idx) {
@@ -1630,7 +1738,6 @@ const data = ${dataJson};
         });
         container.appendChild(opts);
       } else {
-        var ans = item.answer;
         if (Array.isArray(ans)) {
           var blanks = document.createElement("div");
           blanks.className = "blanks";
@@ -1646,20 +1753,17 @@ const data = ${dataJson};
           });
           container.appendChild(blanks);
         } else {
-          var inputSingle = document.createElement("input");
-          inputSingle.type = "text";
-          inputSingle.name = "q" + item.id + "_text";
-          inputSingle.className = "text-answer";
-          container.appendChild(inputSingle);
+          var input = document.createElement("input");
+          input.type = "text";
+          input.name = "q" + item.id + "_text";
+          input.className = "text-answer";
+          container.appendChild(input);
         }
       }
 
       var fb = document.createElement("div");
       fb.className = "feedback";
       container.appendChild(fb);
-
-      container.addEventListener("change", updateProgressBar);
-      container.addEventListener("input", updateProgressBar);
 
       questionsEl.appendChild(container);
     });
@@ -1671,7 +1775,7 @@ const data = ${dataJson};
 
   function checkAnswers() {
     var correct = 0;
-    var totalAuto = 0;
+    var total = 0;
 
     (data.exercises || []).forEach(function(item) {
       var container = questionsEl.querySelector('[data-qid="' + item.id + '"]');
@@ -1682,23 +1786,41 @@ const data = ${dataJson};
       var auto = true;
       var qType = (item.type || "").toLowerCase();
       var qSkill = (item.skill || "").toLowerCase();
+      var isOrdering = qType.indexOf("order") !== -1 || qSkill.indexOf("order") !== -1;
+      var isMatching = qType.indexOf("matching") !== -1 || qSkill.indexOf("matching") !== -1;
 
-      if (
-        qType.indexOf("matching") !== -1 ||
-        qSkill.indexOf("matching") !== -1 ||
-        qType.indexOf("order") !== -1 ||
-        qSkill.indexOf("order") !== -1
-      ) {
-        auto = false;
-      }
+      if (isMatching) auto = false;
 
-      if (auto) {
+      if (isOrdering) {
+        // Special handling for ordering cards
+        total++;
+        var cards = container.querySelectorAll(".ordering-card");
+        var seq = [];
+        cards.forEach(function(card) {
+          var val = card.getAttribute("data-value") || card.textContent || "";
+          seq.push(normalize(val));
+        });
+
+        var targetArr = Array.isArray(ans) ? ans : [ans];
+        var correctSeq = [];
+        targetArr.forEach(function(v) { correctSeq.push(normalize(v)); });
+
+        isCorrect = seq.length === correctSeq.length;
+        if (isCorrect) {
+          for (var i = 0; i < seq.length; i++) {
+            if (seq[i] !== correctSeq[i]) {
+              isCorrect = false;
+              break;
+            }
+          }
+        }
+      } else if (auto) {
         if (Array.isArray(ans)) {
           var inputs = container.querySelectorAll('input[type="text"][data-blank]');
           if (!inputs.length || inputs.length !== ans.length) {
             auto = false;
           } else {
-            totalAuto++;
+            total++;
             isCorrect = true;
             inputs.forEach(function(input, idx) {
               var val = normalize(input.value);
@@ -1725,7 +1847,7 @@ const data = ${dataJson};
             if (!hasExactOption) {
               auto = false;
             } else {
-              totalAuto++;
+              total++;
               var chosen = "";
               radios.forEach(function(r) {
                 var lab = r.parentElement;
@@ -1749,7 +1871,7 @@ const data = ${dataJson};
             if (!textInput) {
               auto = false;
             } else {
-              totalAuto++;
+              total++;
               var val = normalize(textInput.value);
               var target = normalize(ans);
               isCorrect =
@@ -1764,7 +1886,7 @@ const data = ${dataJson};
 
       if (!fb) return;
 
-      if (!auto) {
+      if (!auto && !isOrdering) {
         fb.textContent = "Answer: " + (Array.isArray(ans) ? ans.join(", ") : ans);
         fb.className = "feedback neutral";
       } else if (isCorrect) {
@@ -1772,56 +1894,37 @@ const data = ${dataJson};
         fb.textContent = "✓ Correct";
         fb.className = "feedback correct";
       } else {
-        fb.textContent = "✗ Check again. Answer: " + (Array.isArray(ans) ? ans.join(", ") : ans);
+        fb.textContent = "✗ Check again. Answer: " + (Array.isArray(ans) ? ans.join(" | ") : ans);
         fb.className = "feedback incorrect";
       }
     });
 
-    scoreEl.textContent = "Score: " + correct + " / " + totalAuto + " (auto-marked questions)";
-    updateProgressBar();
+    scoreEl.textContent = "Score: " + correct + " / " + total + " (auto-marked questions)";
   }
 
-  function countAnswered() {
-    var answered = 0;
-    var total = (data.exercises || []).length;
-
-    (data.exercises || []).forEach(function(item) {
-      var container = questionsEl.querySelector('[data-qid="' + item.id + '"]');
-      if (!container) return;
-
-      var answeredThis = false;
-      var textInputs = container.querySelectorAll('input[type="text"]');
-      textInputs.forEach(function(inp) {
-        if (inp.value && inp.value.trim()) answeredThis = true;
-      });
-
-      if (!answeredThis) {
-        var radios = container.querySelectorAll('input[type="radio"]');
-        radios.forEach(function(r) {
-          if (r.checked) answeredThis = true;
-        });
+  function setMode(mode) {
+    renderReading(mode);
+    renderQuestions(mode);
+    modeButtons.forEach(function(btn) {
+      if (btn.getAttribute("data-mode") === mode) {
+        btn.classList.add("active");
+      } else {
+        btn.classList.remove("active");
       }
-
-      if (answeredThis) answered++;
     });
-
-    return { answered: answered, total: total };
+    scoreEl.textContent = "";
+    if (synthSupported && window.speechSynthesis.speaking) {
+      window.speechSynthesis.cancel();
+      setTtsStatus("");
+    }
   }
 
-  function updateProgressBar() {
-    if (!progressLabel || !progressFill) return;
-    var stats = countAnswered();
-    progressLabel.textContent = stats.answered + "/" + stats.total + " questions answered";
-    var pct = stats.total ? Math.round((stats.answered / stats.total) * 100) : 0;
-    progressFill.style.width = pct + "%";
-  }
+  var viewFontSel = document.getElementById("view-font");
+  var viewSpacingSel = document.getElementById("view-spacing");
+  var viewThemeSel = document.getElementById("view-theme");
 
   function applyViewSettings() {
     if (!pageEl) return;
-    var viewFontSel = document.getElementById("view-font");
-    var viewSpacingSel = document.getElementById("view-spacing");
-    var viewThemeSel = document.getElementById("view-theme");
-
     pageEl.classList.toggle("font-large", viewFontSel && viewFontSel.value === "large");
     pageEl.classList.toggle("spacing-relaxed", viewSpacingSel && viewSpacingSel.value === "relaxed");
 
@@ -1831,6 +1934,12 @@ const data = ${dataJson};
     else if (themeVal === "yellow") pageEl.classList.add("theme-yellow");
     else if (themeVal === "blue") pageEl.classList.add("theme-blue");
   }
+
+  if (viewFontSel) viewFontSel.addEventListener("change", applyViewSettings);
+  if (viewSpacingSel) viewSpacingSel.addEventListener("change", applyViewSettings);
+  if (viewThemeSel) viewThemeSel.addEventListener("change", applyViewSettings);
+
+  applyViewSettings();
 
   function showDictMessage(title, body) {
     if (!dictPanel) return;
@@ -1856,7 +1965,7 @@ const data = ${dataJson};
 
   function buildLookupUrl(word) {
     var base = "https://www.google.com/search?q=";
-    var lang = (data.meta && data.meta.outputLanguage) || "";
+    var lang = (data.meta.outputLanguage || "");
     var query = "define " + word + " in " + lang;
     return base + encodeURIComponent(query);
   }
@@ -1871,62 +1980,18 @@ const data = ${dataJson};
     return base + encodeURIComponent(text);
   }
 
-  function buildRouteMessage() {
-    var lvl = (data.meta && data.meta.level || "").toUpperCase();
-    var baseOutType = (data.meta && data.meta.outputType || "reading");
-
-    if (!lvl) {
-      return "Start with the ADAPTED text and gist questions. Then try some detail questions and finish with the listening and pronunciation lab.";
-    }
-
-    if (lvl === "A1" || lvl === "A2") {
-      return "1) Read the ADAPTED text. 2) Do gist and easy vocabulary questions. 3) Try True / False. 4) Finish with listening once or twice and one or two pronunciation words.";
-    }
-    if (lvl === "B1" || lvl === "B2") {
-      return "1) Read STANDARD then ADAPTED. 2) Do gist + detail, plus some vocabulary. 3) Try one listening run with the text hidden. 4) Practise 3–5 key phrases in the pronunciation lab.";
-    }
-    // C1 / C2 or anything else
-    return "1) Read the STANDARD text and predict the main ideas. 2) Mix detail, ordering and cloze questions. 3) Use listening mode with text hidden to build memory. 4) Use the pronunciation lab to polish key academic phrases for speaking or writing " + baseOutType + "s.";
-  }
-
   renderHeader();
-  renderReading("standard");
-  renderQuestions("standard");
-  renderVocabChips();
-  applyViewSettings();
-  updateProgressBar();
-  if (routeText) {
-    routeText.textContent = buildRouteMessage();
-  }
+  setMode("standard");
 
   modeButtons.forEach(function(btn) {
     btn.addEventListener("click", function() {
-      var mode = btn.getAttribute("data-mode") || "standard";
-      modeButtons.forEach(function(b) {
-        if (b === btn) b.classList.add("active");
-        else b.classList.remove("active");
-      });
-      renderReading(mode);
-      renderQuestions(mode);
-      updateProgressBar();
-      if (pageEl) pageEl.classList.remove("listening-hide");
-      if (modePill) modePill.textContent = "reading";
+      setMode(btn.getAttribute("data-mode") || "standard");
     });
   });
 
-  if (checkBtn) {
-    checkBtn.addEventListener("click", function() {
-      checkAnswers();
-    });
-  }
-
-  var viewFontSel = document.getElementById("view-font");
-  var viewSpacingSel = document.getElementById("view-spacing");
-  var viewThemeSel = document.getElementById("view-theme");
-
-  if (viewFontSel) viewFontSel.addEventListener("change", applyViewSettings);
-  if (viewSpacingSel) viewSpacingSel.addEventListener("change", applyViewSettings);
-  if (viewThemeSel) viewThemeSel.addEventListener("change", applyViewSettings);
+  checkBtn.addEventListener("click", function() {
+    checkAnswers();
+  });
 
   var ttsPlay = document.getElementById("tts-play");
   var ttsPause = document.getElementById("tts-pause");
@@ -1964,29 +2029,6 @@ const data = ${dataJson};
     if (ttsPause) ttsPause.disabled = true;
     if (ttsStop) ttsStop.disabled = true;
     setTtsStatus("Read-aloud not supported in this browser.");
-  }
-
-  if (listeningPlay) {
-    listeningPlay.addEventListener("click", function() {
-      var text = getReadingTextForMode(getCurrentMode());
-      speakText(text);
-      if (listeningStatus) listeningStatus.textContent = "Playing current text…";
-    });
-  }
-
-  if (listeningToggleText) {
-    listeningToggleText.addEventListener("click", function() {
-      if (!pageEl) return;
-      var nowHidden = !pageEl.classList.contains("listening-hide");
-      pageEl.classList.toggle("listening-hide", nowHidden);
-      listeningToggleText.textContent = nowHidden ? "Show text" : "🙈 Hide / show text";
-      if (modePill) modePill.textContent = nowHidden ? "listening" : "reading";
-      if (listeningStatus) {
-        listeningStatus.textContent = nowHidden
-          ? "Text hidden. Use your ears, then reveal to check."
-          : "";
-      }
-    });
   }
 
   var defineBtn = document.getElementById("define-selection-btn");
@@ -2061,7 +2103,8 @@ const data = ${dataJson};
       }
       var sim = similarity(currentTargetPhrase, transcript);
       var percent = Math.round(sim * 100);
-      var body = "You said: '" + transcript + "'. Similarity to target: " + percent + "%.";
+      var title = "You said:";
+      var body = "'" + transcript + "'. Similarity to target: " + percent + "%.";
       if (percent > 80) {
         body += " Nice pronunciation!";
       } else if (percent > 50) {
@@ -2069,7 +2112,7 @@ const data = ${dataJson};
       } else {
         body += " The recognition might be off, or you may need to try again more clearly.";
       }
-      showPronounceMessage("Pronunciation result", body);
+      showPronounceMessage(title, body);
     };
 
     recognizer.onerror = function(event) {
@@ -2084,17 +2127,16 @@ const data = ${dataJson};
     } else {
       pronounceBtn.addEventListener("click", function() {
         var sel = window.getSelection().toString().trim();
-        var target = sel || currentTargetPhrase;
-        if (!target) {
-          showPronounceMessage("No target", "Select a word/phrase in the text or click a vocabulary word, then press 'Pronounce'.");
+        if (!sel) {
+          showPronounceMessage("No selection", "Highlight a word or short phrase, then click 'Pronounce' and speak.");
           return;
         }
-        currentTargetPhrase = target;
-        showPronounceMessage("Listening...", "When prompted, allow microphone access and say: '" + target + "'.");
+        currentTargetPhrase = sel;
+        showPronounceMessage("Listening...", "When prompted by the browser, allow microphone access and say: '" + sel + "'.");
         try {
           recognizer.start();
         } catch (e) {
-          // ignore "already started"
+          // ignore "already started" errors
         }
       });
     }
