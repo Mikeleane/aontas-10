@@ -7,7 +7,12 @@ import {
   Paragraph,
   TextRun,
   AlignmentType,
+  Table,
+  TableRow,
+  TableCell,
+  WidthType,
 } from "docx";
+
 import jsPDF from "jspdf";
 
 type AdaptResponse = {
@@ -38,6 +43,18 @@ type ExercisesResponse = {
   error?: string;
 };
 
+type QuestionGoal = "balanced" | "wh" | "vocab" | "structure" | "exam";
+type Level = "A1" | "A2" | "B1" | "B2" | "C1" | "C2";
+type BlockId = "gist" | "detail" | "trueFalse" | "vocab" | "cloze" | "ordering";
+
+type BlockWeights = Partial<Record<BlockId, number>>;
+
+type GoalScaffold = {
+  label: string;
+  description: string;
+  defaultsByLevel: Record<Level, BlockWeights>;
+};
+
 type DebugSnapshot = {
   timestamp: string;
   appVersion: string;
@@ -59,6 +76,7 @@ type DebugSnapshot = {
     adaptedWordCount: number;
   };
   exercisesConfig: {
+    questionGoal: QuestionGoal;
     includeGist: boolean;
     includeDetail: boolean;
     includeTrueFalse: boolean;
@@ -82,7 +100,7 @@ const languageOptions = [
   "Portuguese",
 ];
 
-const levels = ["A1", "A2", "B1", "B2", "C1", "C2"];
+const levels: Level[] = ["A1", "A2", "B1", "B2", "C1", "C2"];
 const outputTypes = [
   "article",
   "essay",
@@ -93,6 +111,82 @@ const outputTypes = [
   "social media chat",
 ];
 
+const questionGoals: QuestionGoal[] = [
+  "balanced",
+  "wh",
+  "vocab",
+  "structure",
+  "exam",
+];
+
+const goalConfig: Record<QuestionGoal, GoalScaffold> = {
+  balanced: {
+    label: "Balanced comprehension",
+    description:
+      "Mix of gist, detail and some vocabulary – a good all-round reading lesson.",
+    defaultsByLevel: {
+      A1: { gist: 1, detail: 3, trueFalse: 2, vocab: 2 },
+      A2: { gist: 1, detail: 4, trueFalse: 2, vocab: 2, cloze: 1 },
+      B1: { gist: 1, detail: 5, trueFalse: 1, vocab: 2, cloze: 2, ordering: 1 },
+      B2: { gist: 1, detail: 5, vocab: 2, cloze: 2, ordering: 1 },
+      C1: { gist: 1, detail: 4, vocab: 3, cloze: 3, ordering: 2 },
+      C2: { gist: 1, detail: 4, vocab: 3, cloze: 3, ordering: 2 },
+    },
+  },
+  wh: {
+    label: "Who / what / where?",
+    description:
+      "Straightforward wh- questions about people, places and key facts.",
+    defaultsByLevel: {
+      A1: { gist: 1, detail: 4, trueFalse: 3 },
+      A2: { gist: 1, detail: 5, trueFalse: 2, vocab: 1 },
+      B1: { gist: 1, detail: 6, trueFalse: 1, vocab: 1 },
+      B2: { gist: 1, detail: 6, vocab: 2 },
+      C1: { gist: 1, detail: 6, vocab: 2 },
+      C2: { gist: 1, detail: 6, vocab: 2 },
+    },
+  },
+  vocab: {
+    label: "Vocabulary & phrases",
+    description:
+      "Work on meanings in context, useful phrases and some form (parts of speech) where appropriate.",
+    defaultsByLevel: {
+      A1: { vocab: 4, trueFalse: 1, cloze: 1, detail: 2, gist: 1 },
+      A2: { vocab: 5, cloze: 2, detail: 2, trueFalse: 1 },
+      B1: { vocab: 4, cloze: 3, detail: 2, trueFalse: 1 },
+      B2: { vocab: 4, cloze: 3, detail: 2 },
+      C1: { vocab: 4, cloze: 3, detail: 2 },
+      C2: { vocab: 4, cloze: 3, detail: 2 },
+    },
+  },
+  structure: {
+    label: "Text structure & sequencing",
+    description:
+      "Focus on ordering, paragraph flow and how the text is organised.",
+    defaultsByLevel: {
+      A1: { gist: 2, ordering: 2, detail: 2, trueFalse: 2 },
+      A2: { gist: 1, ordering: 3, detail: 2, trueFalse: 2, cloze: 1 },
+      B1: { gist: 1, ordering: 3, detail: 3, cloze: 1 },
+      B2: { gist: 1, ordering: 4, detail: 3 },
+      C1: { gist: 1, ordering: 4, detail: 3, cloze: 1 },
+      C2: { gist: 1, ordering: 4, detail: 3, cloze: 1 },
+    },
+  },
+  exam: {
+    label: "Exam-style reading",
+    description:
+      "Closer to exam papers: more detail, cloze and options, tuned to the CEFR level.",
+    defaultsByLevel: {
+      A1: { detail: 4, trueFalse: 3, vocab: 1, cloze: 1, gist: 1 },
+      A2: { detail: 5, trueFalse: 3, vocab: 1, cloze: 1, gist: 1 },
+      B1: { detail: 5, cloze: 3, vocab: 2, gist: 1, ordering: 1 },
+      B2: { detail: 5, cloze: 3, vocab: 2, gist: 1, ordering: 1 },
+      C1: { detail: 4, cloze: 4, vocab: 3, gist: 1, ordering: 2 },
+      C2: { detail: 4, cloze: 4, vocab: 3, gist: 1, ordering: 2 },
+    },
+  },
+};
+
 function countWords(text: string): number {
   const trimmed = text.trim();
   if (!trimmed) return 0;
@@ -102,7 +196,7 @@ function countWords(text: string): number {
 export default function Home() {
   const [inputText, setInputText] = useState("");
   const [outputLanguage, setOutputLanguage] = useState(languageOptions[0]);
-  const [level, setLevel] = useState("B1");
+  const [level, setLevel] = useState<Level>("B1");
   const [outputType, setOutputType] = useState("article");
   const [dyslexiaFriendly, setDyslexiaFriendly] = useState(true);
 
@@ -124,6 +218,9 @@ export default function Home() {
   const [includeVocab, setIncludeVocab] = useState(true);
   const [includeCloze, setIncludeCloze] = useState(false);
   const [includeOrdering, setIncludeOrdering] = useState(false);
+
+  const [questionGoal, setQuestionGoal] =
+    useState<QuestionGoal>("balanced");
 
   const [exercises, setExercises] = useState<ExerciseItem[] | null>(null);
   const [loadingExercises, setLoadingExercises] = useState(false);
@@ -170,56 +267,57 @@ export default function Home() {
     }
   }
 
-async function handleFetchArticle() {
-  if (!articleUrl.trim()) return;
+  async function handleFetchArticle() {
+    if (!articleUrl.trim()) return;
 
-  setFetchingArticle(true);
-  setArticleError(null);
-  setArticleTitle(null);
+    setFetchingArticle(true);
+    setArticleError(null);
+    setArticleTitle(null);
 
-  try {
-    const res = await fetch("/api/fetch-article", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ url: articleUrl.trim() }),
-    });
-
-    // Read body ONCE
-    const raw = await res.text();
-    let data: any = null;
-
-    // Try to parse JSON, but don't crash if it's not JSON
     try {
-      data = raw ? JSON.parse(raw) : null;
-    } catch (e) {
-      console.error("Non-JSON response from /api/fetch-article:", raw);
-      throw new Error(
-        `Unexpected response from article service (status ${res.status}). Try pasting the text manually.`
+      const res = await fetch("/api/fetch-article", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ url: articleUrl.trim() }),
+      });
+
+      // Read body ONCE
+      const raw = await res.text();
+      let data: any = null;
+
+      // Try to parse JSON, but don't crash if it's not JSON
+      try {
+        data = raw ? JSON.parse(raw) : null;
+      } catch (e) {
+        console.error("Non-JSON response from /api/fetch-article:", raw);
+        throw new Error(
+          `Unexpected response from article service (status ${res.status}). Try pasting the text manually.`
+        );
+      }
+
+      if (!res.ok) {
+        throw new Error(
+          data?.error ||
+            `Failed to fetch article text (status ${res.status}).`
+        );
+      }
+
+      if (!data?.text || !data.text.trim()) {
+        throw new Error("Could not extract readable article text.");
+      }
+
+      setArticleTitle(data.title || null);
+      setInputText(data.text);
+    } catch (err: any) {
+      setArticleError(
+        err.message || "Something went wrong fetching the article."
       );
+    } finally {
+      setFetchingArticle(false);
     }
-
-    if (!res.ok) {
-      throw new Error(
-        data?.error || `Failed to fetch article text (status ${res.status}).`
-      );
-    }
-
-    if (!data?.text || !data.text.trim()) {
-      throw new Error("Could not extract readable article text.");
-    }
-
-    setArticleTitle(data.title || null);
-    setInputText(data.text);
-  } catch (err: any) {
-    setArticleError(
-      err.message || "Something went wrong fetching the article."
-    );
-  } finally {
-    setFetchingArticle(false);
   }
-}
 
   // === TEXT EXPORTS ===
 
@@ -232,7 +330,9 @@ async function handleFetchArticle() {
     lines.push(`Output language: ${outputLanguage}`);
     lines.push(`Level: ${level}`);
     lines.push(`Output type: ${outputType}`);
-    lines.push(`Dyslexia-friendly: ${dyslexiaFriendly ? "yes" : "no"}`);
+    lines.push(
+      `Dyslexia-friendly: ${dyslexiaFriendly ? "yes" : "no"}`
+    );
     if (articleUrl.trim()) {
       lines.push(`Source URL: ${articleUrl.trim()}`);
     }
@@ -271,13 +371,16 @@ async function handleFetchArticle() {
     URL.revokeObjectURL(url);
   }
 
-  // Updated DOCX export with nicer formatting
+     // Updated DOCX export with nicer formatting + real tables
   async function downloadDocx(lines: string[], filename: string) {
-    const paragraphs = lines.map((line) => {
+    const blocks: (Paragraph | Table)[] = [];
+
+    // Turn a single text line into a styled paragraph
+    function makeParagraph(line: string): Paragraph {
       const trimmed = line.trim();
       let text = line || " ";
 
-      // Banner-style headings
+      // Banner-style headings (top titles etc.)
       const isBannerHeading =
         trimmed.startsWith("Aontas-10") ||
         trimmed.startsWith("Standard Reading") ||
@@ -292,9 +395,7 @@ async function handleFetchArticle() {
       // Section headings like "=== Reading text (STANDARD version) ==="
       let isSectionHeading = false;
       if (/^===.*===\s*$/.test(trimmed)) {
-        text = trimmed
-          .replace(/^===\s*/, "")
-          .replace(/\s*===\s*$/, "");
+        text = trimmed.replace(/^===\s*/, "").replace(/\s*===\s*$/, "");
         isSectionHeading = true;
       }
 
@@ -303,10 +404,14 @@ async function handleFetchArticle() {
       // Smaller meta text
       const isMeta =
         trimmed.startsWith("Source:") ||
-        trimmed.startsWith("Instructions:") ||
+        trimmed.startsWith("Source title:") ||
+        trimmed.startsWith("Source URL:") ||
+        trimmed.startsWith("Exercise blocks:") ||
         trimmed.startsWith("Output language:") ||
         trimmed.startsWith("Level (CEFR):") ||
-        trimmed.startsWith("Output type:");
+        trimmed.startsWith("Output type:") ||
+        trimmed.startsWith("Standard text length:") ||
+        trimmed.startsWith("Note:");
 
       // Font sizes (half-points)
       let fontSize = 22; // ~11pt body
@@ -343,7 +448,96 @@ async function handleFetchArticle() {
       }
 
       return new Paragraph(paragraphOptions);
-    });
+    }
+
+    // Convert a Markdown-style table block into a real DOCX table
+    function buildTableFromMarkdown(tableLines: string[]): Table {
+      const rows: TableRow[] = [];
+      let headerDone = false;
+
+      tableLines.forEach((raw) => {
+        const parts = raw
+          .split("|")
+          .slice(1, -1)
+          .map((p) => p.trim());
+
+        if (!parts.length) return;
+
+        // Skip separator row like |----|-----|
+        const isSeparatorRow = parts.every((cell) =>
+          /^-+$/.test(cell.replace(/:/g, ""))
+        );
+        if (isSeparatorRow) return;
+
+        const isHeader = !headerDone;
+        if (!headerDone) headerDone = true;
+
+        const cells = parts.map(
+          (cellText) =>
+            new TableCell({
+              children: [
+                new Paragraph({
+                  children: [
+                    new TextRun({
+                      text: cellText || " ",
+                      bold: isHeader,
+                      font: "Arial",
+                      size: 22,
+                    }),
+                  ],
+                }),
+              ],
+            })
+        );
+
+        rows.push(new TableRow({ children: cells }));
+      });
+
+      if (!rows.length) {
+        // Fallback: stuff the raw lines into a single cell
+        return new Table({
+          rows: [
+            new TableRow({
+              children: [
+                new TableCell({
+                  children: tableLines.map((l) => makeParagraph(l)),
+                }),
+              ],
+            }),
+          ],
+        });
+      }
+
+      return new Table({
+        width: {
+          size: 100,
+          type: WidthType.PERCENTAGE,
+        },
+        rows,
+      });
+    }
+
+    // Walk through all lines and decide: paragraph or table?
+    let i = 0;
+    while (i < lines.length) {
+      const raw = lines[i];
+      const trimmed = raw.trim();
+
+      // Markdown table block: consecutive lines starting with "|"
+      if (trimmed.startsWith("|") && trimmed.indexOf("|", 1) !== -1) {
+        const tableLines: string[] = [];
+        while (i < lines.length && lines[i].trim().startsWith("|")) {
+          tableLines.push(lines[i].trim());
+          i++;
+        }
+        blocks.push(buildTableFromMarkdown(tableLines));
+        continue;
+      }
+
+      // Normal paragraph line
+      blocks.push(makeParagraph(raw));
+      i++;
+    }
 
     // Narrow margins: ~2cm top/bottom, 1.5cm left/right
     const doc = new Document({
@@ -359,7 +553,7 @@ async function handleFetchArticle() {
               },
             },
           },
-          children: paragraphs,
+          children: blocks,
         },
       ],
     });
@@ -374,6 +568,7 @@ async function handleFetchArticle() {
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   }
+
 
   function downloadPdf(
     lines: string[],
@@ -412,24 +607,39 @@ async function handleFetchArticle() {
     doc.save(filename);
   }
 
+  // === FILENAME HELPERS ===
+
+  function getSafeSlug() {
+    const safeType = outputType.replace(/\s+/g, "-").toLowerCase();
+    const safeLevel = level.toLowerCase();
+    return { safeType, safeLevel };
+  }
+
+  function buildBaseName(stem?: string) {
+    const { safeType, safeLevel } = getSafeSlug();
+    const prefix = "aontas10";
+    if (!stem) {
+      return `${prefix}-${safeType}-${safeLevel}`;
+    }
+    return `${prefix}-${stem}-${safeType}-${safeLevel}`;
+  }
+
   async function handleDownload() {
     if (!result) return;
     const lines = buildExportLines();
     if (!lines.length) return;
 
-    const safeType = outputType.replace(/\s+/g, "-").toLowerCase();
-    const safeLevel = level.toLowerCase();
+    const baseName = buildBaseName();
 
     if (exportFormat === "txt") {
-      downloadTxt(lines, `aontas10-${safeType}-${safeLevel}.txt`);
+      downloadTxt(lines, `${baseName}.txt`);
     } else if (exportFormat === "docx") {
-      await downloadDocx(lines, `aontas10-${safeType}-${safeLevel}.docx`);
+      await downloadDocx(lines, `${baseName}.docx`);
     } else if (exportFormat === "pdf") {
-      downloadPdf(
-        lines,
-        `aontas10-${safeType}-${safeLevel}.pdf`,
-        { fontSize: 11, lineHeight: 7 }
-      );
+      downloadPdf(lines, `${baseName}.pdf`, {
+        fontSize: 11,
+        lineHeight: 7,
+      });
     }
   }
 
@@ -449,7 +659,7 @@ async function handleFetchArticle() {
     URL.revokeObjectURL(url);
   }
 
-  function buildInteractiveHtml(): string | null {
+    function buildInteractiveHtml(): string | null {
     if (!result || !exercises || !exercises.length) return null;
 
     const dataObj = {
@@ -475,216 +685,606 @@ async function handleFetchArticle() {
 <head>
 <meta charset="UTF-8" />
 <title>Aontas-10 interactive worksheet</title>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
 <style>
+  :root {
+    --bg-body: #020617;
+    --bg-page: #020617;
+    --bg-panel: #020617;
+    --bg-panel-soft: #020617;
+    --border-soft: #1e293b;
+    --border-strong: #1f2937;
+    --accent: #0ea5e9;
+    --accent-soft: rgba(56, 189, 248, 0.12);
+    --accent-strong: #38bdf8;
+    --text-main: #e5e7eb;
+    --text-muted: #9ca3af;
+    --text-soft: #6b7280;
+    --danger: #f97373;
+    --success: #4ade80;
+    --chip-bg: #0b1120;
+    --chip-border: #1e293b;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
   body {
     margin: 0;
     padding: 16px;
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    background: #f4f4f4;
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+      sans-serif;
+    background: radial-gradient(circle at top, #020617 0, #020617 40%, #000 100%);
+    color: var(--text-main);
   }
+
   .page {
-    max-width: 900px;
+    max-width: 960px;
     margin: 0 auto;
-    background: #ffffff;
-    padding: 16px 24px 24px 24px;
-    border-radius: 8px;
-    box-shadow: 0 0 8px rgba(0,0,0,0.08);
-    font-size: 14px;
+    background: var(--bg-page);
+    border-radius: 16px;
+    border: 1px solid var(--border-soft);
+    padding: 18px 20px 22px;
+    box-shadow: 0 22px 40px rgba(15, 23, 42, 0.75);
   }
-  .page.font-large {
-    font-size: 16px;
-  }
-  .page.spacing-relaxed #reading p,
-  .page.spacing-relaxed #questions p {
-    line-height: 1.6;
-  }
-  .page.theme-offwhite {
-    background: #fdf8e6;
-  }
-  .page.theme-yellow {
-    background: #fffbe0;
-  }
-  .page.theme-blue {
-    background: #eaf4ff;
-  }
+
   header h1 {
     margin: 0 0 4px;
-    font-size: 1.4em;
+    font-size: 1.35rem;
   }
+
   header .meta {
     margin: 2px 0;
-    font-size: 0.85em;
-    color: #555;
+    font-size: 0.8rem;
+    color: var(--text-muted);
   }
-  .mode-toggle {
-    margin: 12px 0 4px;
+
+  .meta-bar {
+    display: grid;
+    grid-template-columns: minmax(0, 1.1fr) minmax(0, 1.6fr) auto;
+    gap: 10px;
+    align-items: center;
+    margin: 10px 0 6px;
+  }
+
+  .meta-badges {
     display: flex;
-    gap: 8px;
+    gap: 6px;
     flex-wrap: wrap;
+    align-items: center;
   }
-  .mode-btn {
-    padding: 6px 10px;
-    font-size: 13px;
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px 10px;
     border-radius: 999px;
-    border: 1px solid #ccc;
-    background: #f3f3f3;
+    font-size: 0.73rem;
+    border: 1px solid rgba(148, 163, 184, 0.4);
+    background: radial-gradient(circle at top left, rgba(248, 250, 252, 0.06), transparent);
+    color: var(--text-main);
+  }
+
+  .badge-label {
+    font-weight: 600;
+    text-transform: uppercase;
+    font-size: 0.7rem;
+    letter-spacing: 0.03em;
+    color: var(--text-soft);
+  }
+
+  .badge-pill {
+    font-weight: 600;
+  }
+
+  .badge-level {
+    border-color: rgba(52, 211, 153, 0.35);
+    background: radial-gradient(circle at top left, rgba(16, 185, 129, 0.26), transparent);
+  }
+
+  .badge-mode {
+    border-color: rgba(56, 189, 248, 0.4);
+  }
+
+  .score-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .score-text {
+    font-size: 0.72rem;
+    color: var(--text-soft);
+  }
+
+  .progress-track {
+    width: 100%;
+    height: 6px;
+    border-radius: 999px;
+    background: #020617;
+    overflow: hidden;
+    border: 1px solid #1f2937;
+  }
+
+  .progress-fill {
+    height: 100%;
+    width: 0%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, #22c55e, #38bdf8);
+    transition: width 0.25s ease-out;
+  }
+
+  .badge-callout {
+    font-size: 0.75rem;
+    padding: 6px 10px;
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.9);
+    border: 1px solid rgba(248, 250, 252, 0.12);
+    box-shadow: 0 0 0 1px rgba(148, 163, 184, 0.12);
+    color: #e5e7eb;
+    white-space: nowrap;
+  }
+
+  .badge-callout-stars {
+    margin-right: 4px;
+    color: #fde68a;
+  }
+
+  .mode-toggle {
+    margin: 10px 0 4px;
+    display: inline-flex;
+    padding: 2px;
+    border-radius: 999px;
+    background: #020617;
+    border: 1px solid var(--border-soft);
+    box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.7);
+  }
+
+  .mode-btn {
+    border: none;
+    background: transparent;
+    color: var(--text-soft);
+    font-size: 0.8rem;
+    padding: 4px 12px;
+    border-radius: 999px;
     cursor: pointer;
   }
+
   .mode-btn.active {
-    background: #0ea5e9;
-    color: #ffffff;
-    border-color: #0ea5e9;
+    background: var(--accent-soft);
+    color: var(--accent-strong);
+    font-weight: 600;
   }
+
   .mode-note {
-    font-size: 0.8em;
-    color: #555;
-    margin: 0 0 8px 0;
+    font-size: 0.78rem;
+    color: var(--text-soft);
+    margin: 2px 0 10px;
   }
-  .toolbar {
-    margin: 8px 0 10px;
+
+  .panel {
+    margin-top: 8px;
+    border-radius: 10px;
+    border: 1px solid var(--border-soft);
+    background: radial-gradient(circle at top left, rgba(15, 23, 42, 0.9), #020617);
+    padding: 10px 12px;
+  }
+
+  .panel h2 {
+    margin: 0 0 4px;
+    font-size: 0.9rem;
+  }
+
+  .panel-subtitle {
+    margin: 0 0 6px;
+    font-size: 0.78rem;
+    color: var(--text-soft);
+  }
+
+  .panel-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px 16px;
+    gap: 6px;
     align-items: center;
-    font-size: 12px;
+    margin-top: 4px;
   }
+
+  .panel-note-inline {
+    font-size: 0.74rem;
+    color: var(--text-muted);
+  }
+
+  .toolbar {
+    margin: 10px 0 12px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 14px;
+    align-items: center;
+    font-size: 0.78rem;
+    border-radius: 10px;
+    padding: 8px 10px;
+    border: 1px solid var(--border-soft);
+    background: radial-gradient(circle at top left, rgba(15, 23, 42, 0.85), #020617);
+  }
+
   .toolbar-group {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
     align-items: center;
   }
+
   .toolbar-label {
     font-weight: 600;
+    font-size: 0.76rem;
   }
+
   .toolbar select {
-    font-size: 12px;
+    font-size: 0.75rem;
     padding: 2px 4px;
+    border-radius: 6px;
+    border: 1px solid var(--border-soft);
+    background: #020617;
+    color: var(--text-main);
   }
+
   .small-btn {
     padding: 4px 8px;
-    font-size: 12px;
-    border-radius: 6px;
-    border: 1px solid #d1d5db;
-    background: #f9fafb;
+    font-size: 0.74rem;
+    border-radius: 8px;
+    border: 1px solid #1f2937;
+    background: #0b1120;
+    color: var(--text-main);
     cursor: pointer;
   }
+
   .small-btn:disabled {
-    opacity: 0.5;
+    opacity: 0.45;
     cursor: default;
   }
-  .tts-status {
-    font-size: 11px;
-    color: #555;
-    margin-left: 4px;
+
+  .small-btn-primary {
+    background: #0ea5e9;
+    border-color: #0ea5e9;
+    color: #020617;
+    font-weight: 600;
   }
+
+  .status-pill {
+    font-size: 0.7rem;
+    color: var(--text-soft);
+  }
+
   #reading h2,
   #questions h2 {
     margin-top: 8px;
     margin-bottom: 6px;
-    font-size: 1.15em;
+    font-size: 0.95rem;
   }
+
   #reading p,
   #questions p {
-    font-size: 1em;
-    line-height: 1.4;
+    font-size: 0.85rem;
+    line-height: 1.5;
     margin: 4px 0;
     text-align: left;
   }
+
   #questions .meta {
-    font-size: 0.85em;
-    color: #555;
+    font-size: 0.75rem;
+    color: var(--text-soft);
   }
+
   .question {
-    border-top: 1px solid #e0e0e0;
+    border-top: 1px solid #1f2937;
     padding-top: 8px;
     margin-top: 8px;
   }
+
   .prompt {
     font-weight: 600;
     margin-bottom: 4px;
+    font-size: 0.85rem;
   }
+
+  .question-meta {
+    font-size: 0.72rem;
+    color: var(--text-soft);
+    margin-top: 2px;
+  }
+
   .options label {
     display: block;
     margin-bottom: 2px;
-    font-size: 0.95em;
-    padding: 1px 2px;
+    font-size: 0.83rem;
+    padding: 1px 4px;
+    border-radius: 6px;
+    cursor: pointer;
   }
+
   .options input[type="radio"] {
     margin-right: 4px;
   }
+
   .options label.correct-choice {
-    background: #e6f9f0;
-    border-radius: 4px;
+    background: rgba(34, 197, 94, 0.14);
+    border: 1px solid rgba(34, 197, 94, 0.7);
   }
+
   .options label.incorrect-choice {
-    background: #fae6e6;
-    border-radius: 4px;
+    background: rgba(248, 113, 113, 0.12);
+    border: 1px solid rgba(248, 113, 113, 0.7);
   }
+
   .blanks label {
     display: block;
     margin-bottom: 4px;
-    font-size: 0.95em;
+    font-size: 0.83rem;
   }
+
   .blanks input[type="text"],
   .text-answer {
-    padding: 3px 6px;
-    font-size: 0.95em;
+    padding: 4px 6px;
+    font-size: 0.82rem;
     width: 100%;
     max-width: 360px;
     box-sizing: border-box;
+    border-radius: 6px;
+    border: 1px solid #1f2937;
+    background: #020617;
+    color: var(--text-main);
   }
+
   #check-btn {
     margin-top: 14px;
     padding: 8px 14px;
-    font-size: 13px;
-    border-radius: 6px;
+    font-size: 0.8rem;
+    border-radius: 8px;
     border: none;
     background: #0ea5e9;
-    color: #ffffff;
+    color: #020617;
     cursor: pointer;
-  }
-  #score {
-    margin-top: 8px;
-    font-size: 13px;
     font-weight: 600;
   }
+
+  #score {
+    margin-top: 8px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-main);
+  }
+
   .feedback {
-    margin-top: 4px;
-    font-size: 12px;
+    margin-top: 3px;
+    font-size: 0.75rem;
   }
+
   .feedback.correct {
-    color: #0a7a3b;
+    color: var(--success);
   }
+
   .feedback.incorrect {
-    color: #b00020;
+    color: var(--danger);
   }
+
   .feedback.neutral {
-    color: #555555;
+    color: var(--text-soft);
   }
+
   .dict-panel {
     margin-top: 8px;
     padding: 8px;
-    font-size: 12px;
-    border-radius: 4px;
-    background: #f3f4f6;
-    border: 1px solid #d1d5db;
+    font-size: 0.78rem;
+    border-radius: 8px;
+    background: #020617;
+    border: 1px solid #1f2937;
+    color: var(--text-main);
   }
+
   .dict-panel p {
     margin: 2px 0;
   }
+
+  .chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 4px;
+  }
+
+  .chip {
+    border-radius: 999px;
+    border: 1px solid var(--chip-border);
+    background: var(--chip-bg);
+    padding: 3px 8px;
+    font-size: 0.78rem;
+    cursor: pointer;
+  }
+
+  .chip:hover {
+    border-color: var(--accent-strong);
+  }
+
+  .page.font-large #reading p,
+  .page.font-large #questions p {
+    font-size: 0.94rem;
+  }
+
+  .page.spacing-relaxed #reading p,
+  .page.spacing-relaxed #questions p {
+    line-height: 1.7;
+  }
+
+  .page.theme-offwhite {
+    background: #fdf8e6;
+    color: #111827;
+  }
+
+  .page.theme-offwhite #dict-panel,
+  .page.theme-offwhite #pronounce-panel,
+  .page.theme-offwhite .panel,
+  .page.theme-offwhite .toolbar {
+    background: #fefce8;
+    border-color: #e5e7eb;
+  }
+
+  .page.theme-yellow {
+    background: #fef9c3;
+    color: #111827;
+  }
+
+  .page.theme-blue {
+    background: #e0f2fe;
+    color: #0f172a;
+  }
+
+  .page.listening-hide #reading {
+    color: transparent;
+  }
+
+  .page.listening-hide #reading p {
+    text-shadow: 0 0 12px rgba(15, 23, 42, 0.75);
+  }
+
+  .page.listening-hide #reading::before {
+    content: "Text hidden – listening challenge";
+    display: block;
+    color: var(--text-soft);
+    margin-bottom: 4px;
+    font-size: 0.8rem;
+  }
+
+  @media (max-width: 720px) {
+    .meta-bar {
+      grid-template-columns: minmax(0, 1fr);
+    }
+  }
+
+  /* --- Ordering game --- */
+  .ordering-list {
+    margin-top: 4px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .ordering-card {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 8px;
+    border-radius: 6px;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    font-size: 0.9em;
+  }
+  .ordering-text {
+    flex: 1;
+    margin-right: 8px;
+  }
+  .ordering-controls button {
+    font-size: 11px;
+    padding: 2px 4px;
+    margin-left: 4px;
+    border-radius: 4px;
+    border: 1px solid #d1d5db;
+    background: #f3f4f6;
+    cursor: pointer;
+  }
+
+  /* --- Cloze word bank --- */
+  .cloze-blanks label {
+    display: block;
+    margin-bottom: 4px;
+  }
+  .cloze-word-bank {
+    margin-top: 6px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    align-items: center;
+    font-size: 0.85em;
+  }
+  .cloze-word-bank-label {
+    font-weight: 600;
+    margin-right: 4px;
+  }
+  .cloze-token {
+    border-radius: 999px;
+    border: 1px solid #d1d5db;
+    padding: 3px 8px;
+    background: #f3f4f6;
+    cursor: pointer;
+  }
+  .cloze-token:hover {
+    background: #e5e7eb;
+  }
+
 </style>
 </head>
 <body>
 <div class="page">
   <header id="header"></header>
+
+  <div class="meta-bar">
+    <div class="meta-badges">
+      <div class="badge badge-level">
+        <span class="badge-label">Level</span>
+        <span class="badge-pill" id="level-pill">?</span>
+      </div>
+      <div class="badge badge-mode">
+        <span class="badge-label">Mode</span>
+        <span class="badge-pill" id="mode-pill">reading</span>
+      </div>
+    </div>
+    <div class="score-wrap">
+      <div class="score-text" id="progress-label">0/0 questions answered</div>
+      <div class="progress-track">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+    </div>
+    <div class="badge-callout">
+      <span class="badge-callout-stars">★ ★ ★</span>
+      <span>Try the questions!</span>
+    </div>
+  </div>
+
   <div class="mode-toggle">
     <button class="mode-btn active" data-mode="standard">Standard</button>
     <button class="mode-btn" data-mode="adapted">Adapted</button>
   </div>
-  <p class="mode-note" id="mode-note">
+  <p class="mode-note">
     Standard = fuller, more complex text and tasks. Adapted = same ideas with reduced cognitive load.
   </p>
+
+  <section id="listening-panel" class="panel">
+    <h2>Listening mode</h2>
+    <p class="panel-subtitle">
+      Hide the text and listen. Then answer from memory.
+    </p>
+    <div class="panel-row">
+      <button id="listening-play" class="small-btn small-btn-primary">▶ Play current version</button>
+      <button id="listening-toggle-text" class="small-btn">🙈 Hide / show text</button>
+      <span class="panel-note-inline" id="listening-status"></span>
+    </div>
+  </section>
+
+  <section id="route-panel" class="panel">
+    <h2>Suggested route for this level</h2>
+    <p class="panel-subtitle" id="route-text">
+      Loading route…
+    </p>
+  </section>
+
+  <section id="pronunciation-panel" class="panel">
+    <h2>Pronunciation & vocabulary lab</h2>
+    <p class="panel-subtitle">
+      Click a key word to hear it. Then say it aloud and check your pronunciation.
+    </p>
+    <div id="vocab-chips" class="chip-row"></div>
+  </section>
+
   <div class="toolbar">
     <div class="toolbar-group">
       <span class="toolbar-label">Read aloud:</span>
@@ -705,7 +1305,7 @@ async function handleFetchArticle() {
           <option value="">Default</option>
         </select>
       </label>
-      <span id="tts-status" class="tts-status"></span>
+      <span id="tts-status" class="status-pill"></span>
     </div>
     <div class="toolbar-group">
       <span class="toolbar-label">View:</span>
@@ -742,6 +1342,7 @@ async function handleFetchArticle() {
       <button id="pronounce-selection-btn" class="small-btn">Pronounce</button>
     </div>
   </div>
+
   <section id="reading"></section>
   <section id="questions"></section>
   <button id="check-btn">Check answers</button>
@@ -772,6 +1373,7 @@ const data = ${dataJson};
   var recogSupported = !!Recognition;
   var recognizer = recogSupported ? new Recognition() : null;
   var currentTargetPhrase = "";
+  var currentClozeTarget = null; // which blank to fill from the word bank
 
   function setTtsStatus(msg) {
     var el = document.getElementById("tts-status");
@@ -830,7 +1432,7 @@ const data = ${dataJson};
     defaultOpt.textContent = "Default";
     voiceSel.appendChild(defaultOpt);
 
-    voices.forEach(function(v, idx) {
+    voices.forEach(function(v) {
       var opt = document.createElement("option");
       opt.value = v.name;
       opt.textContent = v.name + " (" + v.lang + ")";
@@ -900,8 +1502,8 @@ const data = ${dataJson};
   }
 
   function similarity(a, b) {
-    var s1 = (a || "").toLowerCase().replace(/[^a-zà-ÿœæçñüß0-9\s]/g, "").trim();
-    var s2 = (b || "").toLowerCase().replace(/[^a-zà-ÿœæçñüß0-9\s]/g, "").trim();
+    var s1 = (a || "").toLowerCase().replace(/[^a-zà-ÿœæçñüß0-9\\s]/g, "").trim();
+    var s2 = (b || "").toLowerCase().replace(/[^a-zà-ÿœæçñüß0-9\\s]/g, "").trim();
     if (!s1 || !s2) return 0;
     var dist = levenshtein(s1, s2);
     var maxLen = Math.max(s1.length, s2.length);
@@ -956,19 +1558,133 @@ const data = ${dataJson};
   }
 
   function renderReading(mode) {
-    readingEl.innerHTML = "";
-    var title = document.createElement("h2");
-    title.textContent = "Reading text (" + (mode === "standard" ? "standard" : "adapted") + " version)";
-    readingEl.appendChild(title);
+  readingEl.innerHTML = "";
+  var title = document.createElement("h2");
+  title.textContent = "Reading text (" + (mode === "standard" ? "standard" : "adapted") + " version)";
+  readingEl.appendChild(title);
 
-    var text = (data.reading && data.reading[mode]) || "";
-    var paragraphs = text.split(/[\\r\\n]+/);
-    paragraphs.forEach(function(line) {
-      if (!line.trim()) return;
-      var p = document.createElement("p");
-      p.textContent = line;
-      readingEl.appendChild(p);
+  var text = (data.reading && data.reading[mode]) || "";
+  var paragraphs = text.split(/[\r\n]+/);   // ✅ fixed
+  paragraphs.forEach(function(line) {
+    if (!line.trim()) return;
+    var p = document.createElement("p");
+    p.textContent = line;
+    readingEl.appendChild(p);
+  });
+}
+
+
+  // --- NEW: ordering and cloze renderers ---
+
+  function renderOrderingQuestion(container, item) {
+    var list = document.createElement("div");
+    list.className = "ordering-list";
+
+    var steps = Array.isArray(item.answer)
+      ? item.answer.slice()
+      : [String(item.answer || "")];
+
+    // randomise initial order a little
+    steps.sort(function() { return Math.random() - 0.5; });
+
+    steps.forEach(function(step) {
+      var card = document.createElement("div");
+      card.className = "ordering-card";
+      card.setAttribute("data-value", step);
+
+      var textSpan = document.createElement("span");
+      textSpan.className = "ordering-text";
+      textSpan.textContent = step;
+      card.appendChild(textSpan);
+
+      var controls = document.createElement("div");
+      controls.className = "ordering-controls";
+
+      var upBtn = document.createElement("button");
+      upBtn.type = "button";
+      upBtn.textContent = "▲";
+      upBtn.title = "Move up";
+      upBtn.addEventListener("click", function() {
+        var parent = card.parentNode;
+        if (!parent) return;
+        var prev = card.previousElementSibling;
+        if (prev) {
+          parent.insertBefore(card, prev);
+        }
+      });
+
+      var downBtn = document.createElement("button");
+      downBtn.type = "button";
+      downBtn.textContent = "▼";
+      downBtn.title = "Move down";
+      downBtn.addEventListener("click", function() {
+        var parent = card.parentNode;
+        if (!parent) return;
+        var next = card.nextElementSibling;
+        if (next) {
+          parent.insertBefore(next, card);
+        }
+      });
+
+      controls.appendChild(upBtn);
+      controls.appendChild(downBtn);
+      card.appendChild(controls);
+
+      list.appendChild(card);
     });
+
+    container.appendChild(list);
+  }
+
+  function renderClozeQuestion(container, item) {
+    var ans = item.answer;
+    var blanksCount = Array.isArray(ans) ? ans.length : 1;
+
+    var blanks = document.createElement("div");
+    blanks.className = "blanks cloze-blanks";
+
+    for (var i = 0; i < blanksCount; i++) {
+      var lab = document.createElement("label");
+      lab.textContent = "Blank " + (i + 1) + ": ";
+      var input = document.createElement("input");
+      input.type = "text";
+      input.setAttribute("data-blank", String(i));
+      input.name = "q" + item.id + "_blank" + i;
+      input.addEventListener("focus", function(ev) {
+        currentClozeTarget = ev.target;
+      });
+      lab.appendChild(input);
+      blanks.appendChild(lab);
+    }
+
+    container.appendChild(blanks);
+
+    var bankContainer = document.createElement("div");
+    bankContainer.className = "cloze-word-bank";
+
+    var title = document.createElement("div");
+    title.className = "cloze-word-bank-label";
+    title.textContent = "Word bank:";
+    bankContainer.appendChild(title);
+
+    var words = Array.isArray(ans) ? ans.slice() : [String(ans || "")];
+    words.sort(function() { return Math.random() - 0.5; });
+
+    words.forEach(function(word) {
+      var token = document.createElement("button");
+      token.type = "button";
+      token.className = "cloze-token";
+      token.textContent = word;
+      token.addEventListener("click", function() {
+        if (currentClozeTarget) {
+          currentClozeTarget.value = word;
+          currentClozeTarget.focus();
+        }
+      });
+      bankContainer.appendChild(token);
+    });
+
+    container.appendChild(bankContainer);
   }
 
   function renderQuestions(mode) {
@@ -993,7 +1709,17 @@ const data = ${dataJson};
       prompt.textContent = "Q" + item.id + ". " + side.prompt;
       container.appendChild(prompt);
 
-      if (side.options && side.options.length) {
+      var qType = (item.type || "").toLowerCase();
+      var qSkill = (item.skill || "").toLowerCase();
+      var ans = item.answer;
+      var isOrdering = qType.indexOf("order") !== -1 || qSkill.indexOf("order") !== -1;
+      var isCloze = qType.indexOf("cloze") !== -1 || qSkill.indexOf("cloze") !== -1;
+
+      if (isOrdering) {
+        renderOrderingQuestion(container, item);
+      } else if (isCloze) {
+        renderClozeQuestion(container, item);
+      } else if (side.options && side.options.length) {
         var opts = document.createElement("div");
         opts.className = "options";
         side.options.forEach(function(opt, idx) {
@@ -1013,7 +1739,6 @@ const data = ${dataJson};
         });
         container.appendChild(opts);
       } else {
-        var ans = item.answer;
         if (Array.isArray(ans)) {
           var blanks = document.createElement("div");
           blanks.className = "blanks";
@@ -1062,19 +1787,36 @@ const data = ${dataJson};
       var auto = true;
       var qType = (item.type || "").toLowerCase();
       var qSkill = (item.skill || "").toLowerCase();
+      var isOrdering = qType.indexOf("order") !== -1 || qSkill.indexOf("order") !== -1;
+      var isMatching = qType.indexOf("matching") !== -1 || qSkill.indexOf("matching") !== -1;
 
-      // Hard-code some question types as teacher-checked:
-      // matching headings, ordering / sequencing etc.
-      if (qType.indexOf("matching") !== -1 ||
-          qSkill.indexOf("matching") !== -1 ||
-          qType.indexOf("order") !== -1 ||
-          qSkill.indexOf("order") !== -1) {
-        auto = false;
-      }
+      if (isMatching) auto = false;
 
-      if (auto) {
+      if (isOrdering) {
+        // Special handling for ordering cards
+        total++;
+        var cards = container.querySelectorAll(".ordering-card");
+        var seq = [];
+        cards.forEach(function(card) {
+          var val = card.getAttribute("data-value") || card.textContent || "";
+          seq.push(normalize(val));
+        });
+
+        var targetArr = Array.isArray(ans) ? ans : [ans];
+        var correctSeq = [];
+        targetArr.forEach(function(v) { correctSeq.push(normalize(v)); });
+
+        isCorrect = seq.length === correctSeq.length;
+        if (isCorrect) {
+          for (var i = 0; i < seq.length; i++) {
+            if (seq[i] !== correctSeq[i]) {
+              isCorrect = false;
+              break;
+            }
+          }
+        }
+      } else if (auto) {
         if (Array.isArray(ans)) {
-          // Multi-blank exact answers
           var inputs = container.querySelectorAll('input[type="text"][data-blank]');
           if (!inputs.length || inputs.length !== ans.length) {
             auto = false;
@@ -1090,10 +1832,8 @@ const data = ${dataJson};
             });
           }
         } else {
-          // Single answer: either MCQ or free text
           var radios = container.querySelectorAll('input[type="radio"][name="q' + item.id + '"]');
           if (radios.length) {
-            // Multiple-choice
             var optionsList = [];
             if (item.standard && item.standard.options && item.standard.options.length) {
               optionsList = item.standard.options;
@@ -1105,8 +1845,6 @@ const data = ${dataJson};
               return normalize(opt) === normalizedAns;
             });
 
-            // If the shared answer text doesn't exactly match any option,
-            // fall back to teacher-checked instead of pretending to auto-mark.
             if (!hasExactOption) {
               auto = false;
             } else {
@@ -1130,7 +1868,6 @@ const data = ${dataJson};
               });
             }
           } else {
-            // Free-text single answer
             var textInput = container.querySelector('input[type="text"]');
             if (!textInput) {
               auto = false;
@@ -1150,7 +1887,7 @@ const data = ${dataJson};
 
       if (!fb) return;
 
-      if (!auto) {
+      if (!auto && !isOrdering) {
         fb.textContent = "Answer: " + (Array.isArray(ans) ? ans.join(", ") : ans);
         fb.className = "feedback neutral";
       } else if (isCorrect) {
@@ -1158,7 +1895,7 @@ const data = ${dataJson};
         fb.textContent = "✓ Correct";
         fb.className = "feedback correct";
       } else {
-        fb.textContent = "✗ Check again. Answer: " + (Array.isArray(ans) ? ans.join(", ") : ans);
+        fb.textContent = "✗ Check again. Answer: " + (Array.isArray(ans) ? ans.join(" | ") : ans);
         fb.className = "feedback incorrect";
       }
     });
@@ -1183,7 +1920,6 @@ const data = ${dataJson};
     }
   }
 
-  // View settings
   var viewFontSel = document.getElementById("view-font");
   var viewSpacingSel = document.getElementById("view-spacing");
   var viewThemeSel = document.getElementById("view-theme");
@@ -1258,7 +1994,6 @@ const data = ${dataJson};
     checkAnswers();
   });
 
-  // TTS controls
   var ttsPlay = document.getElementById("tts-play");
   var ttsPause = document.getElementById("tts-pause");
   var ttsStop = document.getElementById("tts-stop");
@@ -1297,7 +2032,6 @@ const data = ${dataJson};
     setTtsStatus("Read-aloud not supported in this browser.");
   }
 
-  // Dictionary / lookup / translate / image / pronunciation controls
   var defineBtn = document.getElementById("define-selection-btn");
   var lookupBtn = document.getElementById("lookup-selection-btn");
   var translateBtn = document.getElementById("translate-selection-btn");
@@ -1385,10 +2119,6 @@ const data = ${dataJson};
     recognizer.onerror = function(event) {
       showPronounceMessage("Recognition error", event.error || "Something went wrong.");
     };
-
-    recognizer.onend = function() {
-      // no-op
-    };
   }
 
   if (pronounceBtn) {
@@ -1407,26 +2137,26 @@ const data = ${dataJson};
         try {
           recognizer.start();
         } catch (e) {
-          // Some browsers throw if already started
+          // ignore "already started" errors
         }
       });
     }
   }
 })();
 </script>
+
 </body>
 </html>`;
 
     return html;
   }
 
+
   function handleDownloadInteractiveHtml() {
     const html = buildInteractiveHtml();
     if (!html) return;
-    const safeType = outputType.replace(/\s+/g, "-").toLowerCase();
-    const safeLevel = level.toLowerCase();
-    const filename = `aontas10-interactive-${safeType}-${safeLevel}.html`;
-    downloadHtml(html, filename);
+    const baseName = buildBaseName("interactive");
+    downloadHtml(html, `${baseName}.html`);
   }
 
   // === DEBUG SNAPSHOT ===
@@ -1455,6 +2185,7 @@ const data = ${dataJson};
         adaptedWordCount: countWords(result.adaptedOutput),
       },
       exercisesConfig: {
+        questionGoal,
         includeGist,
         includeDetail,
         includeTrueFalse,
@@ -1475,10 +2206,9 @@ const data = ${dataJson};
     });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
-    const safeType = outputType.replace(/\s+/g, "-").toLowerCase();
-    const safeLevel = level.toLowerCase();
+    const baseName = buildBaseName("debug");
     a.href = url;
-    a.download = `aontas10-debug-${safeType}-${safeLevel}.json`;
+    a.download = `${baseName}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -1486,6 +2216,18 @@ const data = ${dataJson};
   }
 
   // === EXERCISE GENERATION ===
+
+  function applyGoalDefaults(goal: QuestionGoal, lvl: Level) {
+    const cfg = goalConfig[goal];
+    const weights = cfg.defaultsByLevel[lvl];
+
+    setIncludeGist(!!weights.gist);
+    setIncludeDetail(!!weights.detail);
+    setIncludeTrueFalse(!!weights.trueFalse);
+    setIncludeVocab(!!weights.vocab);
+    setIncludeCloze(!!weights.cloze);
+    setIncludeOrdering(!!weights.ordering);
+  }
 
   async function handleGenerateExercises() {
     if (!result) return;
@@ -1518,6 +2260,15 @@ const data = ${dataJson};
           outputLanguage,
           level,
           outputType,
+          questionGoal,
+          blockWeights: {
+            gist: includeGist ? 1 : 0,
+            detail: includeDetail ? 1 : 0,
+            trueFalse: includeTrueFalse ? 1 : 0,
+            vocab: includeVocab ? 1 : 0,
+            cloze: includeCloze ? 1 : 0,
+            ordering: includeOrdering ? 1 : 0,
+          },
           includeGist,
           includeDetail,
           includeTrueFalse,
@@ -1544,7 +2295,66 @@ const data = ${dataJson};
     }
   }
 
-  // === EXERCISE EXPORT HELPERS ===
+   // === EXERCISE EXPORT HELPERS ===
+
+  function splitPromptLines(raw: string | undefined | null): string[] {
+    if (!raw) return [];
+    return raw
+      .split(/\r?\n/)
+      .map((line) => line.trimEnd())
+      .filter((line) => line.trim() !== "");
+  }
+
+  function addQuestionBlock(
+    lines: string[],
+    item: ExerciseItem,
+    side: "standard" | "adapted"
+  ) {
+    const sideData = side === "standard" ? item.standard : item.adapted;
+    const promptLines = splitPromptLines(sideData.prompt);
+
+    if (!promptLines.length) {
+      lines.push(`Q${item.id}.`);
+    } else {
+      // First line with Q number
+      lines.push(`Q${item.id}. ${promptLines[0]}`);
+      // Subsequent lines indented (so “Headings: A. …” etc don’t sit in a single clump)
+      for (let i = 1; i < promptLines.length; i++) {
+        lines.push(`   ${promptLines[i]}`);
+      }
+    }
+
+    // Multiple-choice options, if present
+    if (sideData.options && sideData.options.length) {
+      sideData.options.forEach((opt, idx) => {
+        const label = String.fromCharCode(97 + idx); // a, b, c...
+        lines.push(`   ${label}) ${opt}`);
+      });
+    }
+
+    lines.push("");
+  }
+
+  function addPromptBlock(
+    lines: string[],
+    label: string,
+    prompt: string | undefined
+  ) {
+    const promptLines = splitPromptLines(prompt || "");
+    const baseIndent = "  ";
+
+    if (!promptLines.length) {
+      lines.push(`${baseIndent}${label}:`);
+      return;
+    }
+
+    // First line with label
+    lines.push(`${baseIndent}${label}: ${promptLines[0]}`);
+    // Subsequent lines further indented
+    for (let i = 1; i < promptLines.length; i++) {
+      lines.push(`${baseIndent}   ${promptLines[i]}`);
+    }
+  }
 
   function buildSelectedBlocksLabel(): string {
     const blocks: string[] = [];
@@ -1570,6 +2380,9 @@ const data = ${dataJson};
     if (articleUrl.trim()) {
       lines.push(`Source: ${articleUrl.trim()}`);
     }
+    lines.push(
+      `Exercise blocks: ${buildSelectedBlocksLabel()}`
+    );
     lines.push("");
     lines.push(
       "Instructions: Answer the questions below. Use the STANDARD version of the text."
@@ -1577,17 +2390,7 @@ const data = ${dataJson};
     lines.push("");
 
     const sorted = [...exercises].sort((a, b) => a.id - b.id);
-
-    sorted.forEach((item) => {
-      lines.push(`Q${item.id}. ${item.standard.prompt}`);
-      if (item.standard.options && item.standard.options.length) {
-        item.standard.options.forEach((opt, idx) => {
-          const label = String.fromCharCode(97 + idx);
-          lines.push(`   ${label}) ${opt}`);
-        });
-      }
-      lines.push("");
-    });
+    sorted.forEach((item) => addQuestionBlock(lines, item, "standard"));
 
     return lines;
   }
@@ -1605,6 +2408,9 @@ const data = ${dataJson};
     if (articleUrl.trim()) {
       lines.push(`Source: ${articleUrl.trim()}`);
     }
+    lines.push(
+      `Exercise blocks: ${buildSelectedBlocksLabel()}`
+    );
     lines.push("");
     lines.push(
       "Instructions: Answer the questions below. Use the ADAPTED version of the text."
@@ -1612,17 +2418,7 @@ const data = ${dataJson};
     lines.push("");
 
     const sorted = [...exercises].sort((a, b) => a.id - b.id);
-
-    sorted.forEach((item) => {
-      lines.push(`Q${item.id}. ${item.adapted.prompt}`);
-      if (item.adapted.options && item.adapted.options.length) {
-        item.adapted.options.forEach((opt, idx) => {
-          const label = String.fromCharCode(97 + idx);
-          lines.push(`   ${label}) ${opt}`);
-        });
-      }
-      lines.push("");
-    });
+    sorted.forEach((item) => addQuestionBlock(lines, item, "adapted"));
 
     return lines;
   }
@@ -1662,7 +2458,9 @@ const data = ${dataJson};
 
     sorted.forEach((item) => {
       lines.push(`Q${item.id} – type: ${item.type}, skill: ${item.skill}`);
-      lines.push(`  Standard prompt: ${item.standard.prompt}`);
+      lines.push("");
+
+      addPromptBlock(lines, "Standard prompt", item.standard.prompt);
       if (item.standard.options && item.standard.options.length) {
         lines.push("  Standard options:");
         item.standard.options.forEach((opt, idx) => {
@@ -1670,7 +2468,9 @@ const data = ${dataJson};
           lines.push(`    ${label}) ${opt}`);
         });
       }
-      lines.push(`  Adapted prompt: ${item.adapted.prompt}`);
+
+      lines.push("");
+      addPromptBlock(lines, "Adapted prompt", item.adapted.prompt);
       if (item.adapted.options && item.adapted.options.length) {
         lines.push("  Adapted options:");
         item.adapted.options.forEach((opt, idx) => {
@@ -1678,6 +2478,7 @@ const data = ${dataJson};
           lines.push(`    ${label}) ${opt}`);
         });
       }
+
       const answerText = Array.isArray(item.answer)
         ? item.answer.join(" | ")
         : item.answer;
@@ -1702,8 +2503,10 @@ const data = ${dataJson};
     if (articleUrl.trim()) {
       lines.push(`Source: ${articleUrl.trim()}`);
     }
+    lines.push(
+      `Exercise blocks: ${buildSelectedBlocksLabel()}`
+    );
     lines.push("");
-
     lines.push("=== Reading text (STANDARD version) ===");
 
     result.standardOutput.split(/\r?\n/).forEach((line) => lines.push(line));
@@ -1716,17 +2519,7 @@ const data = ${dataJson};
     lines.push("");
 
     const sorted = [...exercises].sort((a, b) => a.id - b.id);
-
-    sorted.forEach((item) => {
-      lines.push(`Q${item.id}. ${item.standard.prompt}`);
-      if (item.standard.options && item.standard.options.length) {
-        item.standard.options.forEach((opt, idx) => {
-          const label = String.fromCharCode(97 + idx);
-          lines.push(`   ${label}) ${opt}`);
-        });
-      }
-      lines.push("");
-    });
+    sorted.forEach((item) => addQuestionBlock(lines, item, "standard"));
 
     return lines;
   }
@@ -1743,8 +2536,10 @@ const data = ${dataJson};
     if (articleUrl.trim()) {
       lines.push(`Source: ${articleUrl.trim()}`);
     }
+    lines.push(
+      `Exercise blocks: ${buildSelectedBlocksLabel()}`
+    );
     lines.push("");
-
     lines.push("=== Reading text (ADAPTED version) ===");
 
     result.adaptedOutput.split(/\r?\n/).forEach((line) => lines.push(line));
@@ -1757,17 +2552,7 @@ const data = ${dataJson};
     lines.push("");
 
     const sorted = [...exercises].sort((a, b) => a.id - b.id);
-
-    sorted.forEach((item) => {
-      lines.push(`Q${item.id}. ${item.adapted.prompt}`);
-      if (item.adapted.options && item.adapted.options.length) {
-        item.adapted.options.forEach((opt, idx) => {
-          const label = String.fromCharCode(97 + idx);
-          lines.push(`   ${label}) ${opt}`);
-        });
-      }
-      lines.push("");
-    });
+    sorted.forEach((item) => addQuestionBlock(lines, item, "adapted"));
 
     return lines;
   }
@@ -1779,16 +2564,14 @@ const data = ${dataJson};
     const lines = buildStandardExerciseLines();
     if (!lines.length) return;
 
-    const safeType = outputType.replace(/\s+/g, "-").toLowerCase();
-    const safeLevel = level.toLowerCase();
-    const filename = `aontas10-exercises-standard-${safeType}-${safeLevel}`;
+    const baseName = buildBaseName("exercises-standard");
 
     if (exerciseExportFormat === "txt") {
-      downloadTxt(lines, `${filename}.txt`);
+      downloadTxt(lines, `${baseName}.txt`);
     } else if (exerciseExportFormat === "docx") {
-      await downloadDocx(lines, `${filename}.docx`);
+      await downloadDocx(lines, `${baseName}.docx`);
     } else {
-      downloadPdf(lines, `${filename}.pdf`, {
+      downloadPdf(lines, `${baseName}.pdf`, {
         fontSize: 11,
         lineHeight: 7,
       });
@@ -1800,16 +2583,14 @@ const data = ${dataJson};
     const lines = buildAdaptedExerciseLines();
     if (!lines.length) return;
 
-    const safeType = outputType.replace(/\s+/g, "-").toLowerCase();
-    const safeLevel = level.toLowerCase();
-    const filename = `aontas10-exercises-adapted-${safeType}-${safeLevel}`;
+    const baseName = buildBaseName("exercises-adapted");
 
     if (exerciseExportFormat === "txt") {
-      downloadTxt(lines, `${filename}.txt`);
+      downloadTxt(lines, `${baseName}.txt`);
     } else if (exerciseExportFormat === "docx") {
-      await downloadDocx(lines, `${filename}.docx`);
+      await downloadDocx(lines, `${baseName}.docx`);
     } else {
-      downloadPdf(lines, `${filename}.pdf`, {
+      downloadPdf(lines, `${baseName}.pdf`, {
         fontSize: 11,
         lineHeight: 7,
       });
@@ -1821,16 +2602,14 @@ const data = ${dataJson};
     const lines = buildTeacherKeyLines();
     if (!lines.length) return;
 
-    const safeType = outputType.replace(/\s+/g, "-").toLowerCase();
-    const safeLevel = level.toLowerCase();
-    const filename = `aontas10-exercises-key-${safeType}-${safeLevel}`;
+    const baseName = buildBaseName("exercises-key");
 
     if (exerciseExportFormat === "txt") {
-      downloadTxt(lines, `${filename}.txt`);
+      downloadTxt(lines, `${baseName}.txt`);
     } else if (exerciseExportFormat === "docx") {
-      await downloadDocx(lines, `${filename}.docx`);
+      await downloadDocx(lines, `${baseName}.docx`);
     } else {
-      downloadPdf(lines, `${filename}.pdf`, {
+      downloadPdf(lines, `${baseName}.pdf`, {
         fontSize: 11,
         lineHeight: 7,
       });
@@ -1842,17 +2621,14 @@ const data = ${dataJson};
     const lines = buildStandardCombinedLines();
     if (!lines.length) return;
 
-    const safeType = outputType.replace(/\s+/g, "-").toLowerCase();
-    const safeLevel = level.toLowerCase();
-    const filename =
-      `aontas10-reading-questions-standard-${safeType}-${safeLevel}`;
+    const baseName = buildBaseName("reading-questions-standard");
 
     if (exerciseExportFormat === "txt") {
-      downloadTxt(lines, `${filename}.txt`);
+      downloadTxt(lines, `${baseName}.txt`);
     } else if (exerciseExportFormat === "docx") {
-      await downloadDocx(lines, `${filename}.docx`);
+      await downloadDocx(lines, `${baseName}.docx`);
     } else {
-      downloadPdf(lines, `${filename}.pdf`, {
+      downloadPdf(lines, `${baseName}.pdf`, {
         fontSize: 10,
         lineHeight: 6.5,
         marginLeft: 15,
@@ -1867,17 +2643,14 @@ const data = ${dataJson};
     const lines = buildAdaptedCombinedLines();
     if (!lines.length) return;
 
-    const safeType = outputType.replace(/\s+/g, "-").toLowerCase();
-    const safeLevel = level.toLowerCase();
-    const filename =
-      `aontas10-reading-questions-adapted-${safeType}-${safeLevel}`;
+    const baseName = buildBaseName("reading-questions-adapted");
 
     if (exerciseExportFormat === "txt") {
-      downloadTxt(lines, `${filename}.txt`);
+      downloadTxt(lines, `${baseName}.txt`);
     } else if (exerciseExportFormat === "docx") {
-      await downloadDocx(lines, `${filename}.docx`);
+      await downloadDocx(lines, `${baseName}.docx`);
     } else {
-      downloadPdf(lines, `${filename}.pdf`, {
+      downloadPdf(lines, `${baseName}.pdf`, {
         fontSize: 10,
         lineHeight: 6.5,
         marginLeft: 15,
@@ -1976,11 +2749,13 @@ const data = ${dataJson};
             </div>
 
             <div className="space-y-1">
-              <label className="block text-sm font-medium">Level (CEFR)</label>
+              <label className="block text-sm font-medium">
+                Level (CEFR)
+              </label>
               <select
                 className="w-full rounded-md border border-slate-700 bg-slate-950 px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-sky-500"
                 value={level}
-                onChange={(e) => setLevel(e.target.value)}
+                onChange={(e) => setLevel(e.target.value as Level)}
               >
                 {levels.map((lvl) => (
                   <option key={lvl} value={lvl}>
@@ -2112,6 +2887,9 @@ const data = ${dataJson};
                   STANDARD and an ADAPTED version, but they all share a single
                   answer key so the whole class can work together.
                 </p>
+                <p className="text-[10px] text-slate-400 mt-1">
+                  Selected blocks: {buildSelectedBlocksLabel()}
+                </p>
               </div>
               <button
                 type="button"
@@ -2125,6 +2903,44 @@ const data = ${dataJson};
               </button>
             </div>
 
+            {/* Question focus + presets */}
+            <div className="grid gap-3 md:grid-cols-2 text-xs mt-2">
+              <div className="space-y-1">
+                <label className="block font-medium">Question focus</label>
+                <select
+                  className="w-full rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs outline-none focus:ring-2 focus:ring-sky-500"
+                  value={questionGoal}
+                  onChange={(e) =>
+                    setQuestionGoal(e.target.value as QuestionGoal)
+                  }
+                >
+                  {questionGoals.map((goalKey) => (
+                    <option key={goalKey} value={goalKey}>
+                      {goalConfig[goalKey].label}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-[10px] text-slate-400">
+                  {goalConfig[questionGoal].description}
+                </p>
+              </div>
+              <div className="space-y-1">
+                <label className="block font-medium">Quick presets</label>
+                <button
+                  type="button"
+                  onClick={() => applyGoalDefaults(questionGoal, level)}
+                  className="inline-flex items-center justify-center rounded-md bg-slate-800 px-3 py-1.5 text-[11px] font-medium text-slate-100"
+                >
+                  Apply for level {level}
+                </button>
+                <p className="text-[10px] text-slate-400">
+                  This toggles the blocks below based on your focus and CEFR
+                  level. You can still tweak them manually.
+                </p>
+              </div>
+            </div>
+
+            {/* Block checkboxes */}
             <div className="grid gap-2 md:grid-cols-3 text-xs mt-2">
               <label className="inline-flex items-center gap-2">
                 <input
