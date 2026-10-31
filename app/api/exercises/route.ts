@@ -1,3 +1,4 @@
+import { validateEvidenceMap } from "../../../lib/evidence-map";
 import { NextResponse } from "next/server";
 
 type ExerciseSide = {
@@ -12,6 +13,7 @@ type ExerciseItem = {
   answer: string | string[];
   standard: ExerciseSide;
   adapted: ExerciseSide;
+  evidence?: { standard?: string[]; adapted?: string[]; targetTerms?: string[]; reasoning?: "explicit" | "inference" | "grammar" | "vocabulary" | "external" };
 };
 
 type ExercisesRequestBody = {
@@ -218,6 +220,16 @@ BLOCK REQUIREMENTS
    - ADAPTED: simpler wording, but same items and same correct order.
    - "answer" is an array that shows the correct order.
 
+EVIDENCE MAP (MANDATORY)
+- For EVERY item, supply evidence.standard and evidence.adapted as nonempty arrays of exact text excerpts, copied from the respective passages.
+- Excerpts must be literal substrings, preserving wording; no paraphrases or invented evidence.
+- Identify the reasoning type: explicit, inference, grammar, vocabulary, or external.
+- For every vocabulary question, list the exact tested term(s) in targetTerms.
+- For grammar questions, list the required target form in targetTerms only when the question explicitly assesses a form as appearing in the source; do not list answer variants that learners must generate from grammar rules.
+- If the facts or information necessary to answer are absent in either route, fix the question so both can answer it. Never create fake evidence.
+- Inference questions require human/semantic review even if excerpts exist.
+- A single shared answer is compulsory.
+ 
 Quantity overall:
 - Aim for about 8–12 items total across all enabled blocks.
 - Use the lower end if the text is very short.
@@ -244,6 +256,12 @@ Output format:
       "adapted": {
         "prompt": "string",
         "options": ["..."] // optional, for MCQs
+      },
+      "evidence": {
+        "standard": ["verbatim supporting phrase copied from STANDARD TEXT"],
+        "adapted": ["verbatim supporting phrase copied from ADAPTED TEXT"],
+        "targetTerms": ["exact vocabulary or grammar expressions being assessed, when applicable"],
+        "reasoning": "explicit" | "inference" | "grammar" | "vocabulary" | "external"
       }
     },
     ...
@@ -345,20 +363,16 @@ Remember:
       );
     }
 
-    // Ensure ids are consecutive: 1..N
-    const items = parsed.items;
-    const sorted = [...items].sort((a, b) => a.id - b.id);
-    const idsOk = sorted.every((item, idx) => item.id === idx + 1);
-    if (!idsOk) {
-      sorted.forEach((item, idx) => {
-        item.id = idx + 1;
-      });
+    // Fail closed: never silently renumber or publish questions without
+    // traceable supporting passages in both reading routes.
+    const validation = validateEvidenceMap(parsed.items, standardText, adaptedText);
+    if (validation.status !== "pass") {
+      return NextResponse.json(
+        { error: "Evidence-map validation requires repair or review.", validation },
+        { status: 422 }
+      );
     }
-
-    return NextResponse.json(
-      { items: sorted },
-      { status: 200 }
-    );
+    return NextResponse.json({ items: parsed.items, validation }, { status: 200 });
   } catch (err: any) {
     console.error("Error in /api/exercises:", err);
     return NextResponse.json(
